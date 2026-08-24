@@ -1,0 +1,93 @@
+# dreeve-zepp-connector
+
+Pulls workouts from your Zepp / Amazfit cloud account and writes them as
+`.FIT` files into a local folder — intended to be [Dreeve](https://github.com/dreeveapp/dreeve)'s
+watch folder, alongside its existing [Garmin connector](https://github.com/dreeveapp/dreeve-garmin-connector).
+
+Unlike the Garmin connector, Zepp's API has no native `.FIT` export — this
+tool decodes Zepp's raw per-sample track data (GPS, heart rate, altitude,
+cadence) and synthesizes a `.FIT` file from it.
+
+## Status
+
+Work in progress (v1: one-shot CLI, no daemon/Docker yet).
+
+## Requirements
+
+- Python 3.12+
+- [uv](https://docs.astral.sh/uv/)
+- A Zepp / Amazfit account (email + password login)
+
+## Setup
+
+```bash
+uv sync
+cp .env.example .env   # then add your Zepp credentials and output dir
+```
+
+## Configuration
+
+```ini
+ZEPP_EMAIL=you@example.com
+ZEPP_PASSWORD=your-zepp-password
+OUTPUT_DIR=/path/to/dreeve/watch-folder
+SINCE=-30d
+```
+
+`SINCE` (or `--since`) sets where import starts from — useful if you've
+already imported older history some other way and just want to pick up from
+a point in time. Accepts an ISO date (`2026-07-24`), a relative offset
+(`-30d`), or `all` (default — no lower bound, subject to `--limit`).
+Already-exported workouts are tracked in a ledger file and always skipped on
+later runs regardless of `SINCE`.
+
+## Usage
+
+```bash
+uv run python -m dreeve_zepp_connector --dry-run
+uv run python -m dreeve_zepp_connector
+uv run python -m dreeve_zepp_connector --since -30d          # only the last 30 days
+uv run python -m dreeve_zepp_connector --since 2026-07-24    # only from this date on
+```
+
+`--limit` (default 200) caps the total number of workouts considered, paging
+back through Zepp's history as needed to satisfy `--since` — raise it if you
+have more than 200 workouts within the window you're importing.
+
+## Notes on the underlying (unofficial) API
+
+This tool talks to `api-mifit.zepp.com` with plain query params (`trackid`,
+`source`, `userid`) — confirmed working as of 2026-08. Two things worth
+knowing if it ever stops working:
+
+- **Regional hosts.** Live traffic from the official app has been observed
+  hitting region-specific hosts too, e.g. `api-mifit-de2.zepp.com` for an
+  EU-region account, rather than the unqualified `api-mifit.zepp.com` this
+  tool uses. `huami-token`'s login flow is similarly hardcoded to a `us2`
+  region (see `zepp_client.py`'s docstring) despite Zepp accounts being
+  sharded by region — the unqualified host has worked fine so far, but a
+  region mismatch is the first thing to suspect if login/fetch calls start
+  failing for a specific account.
+- **A newer encrypted-payload scheme.** The same live traffic shows
+  `/v1/sport/run/detail.json` being called with a single encrypted
+  `cipher_data` query parameter instead of plaintext `trackid`/`source`/
+  `userid` — likely a newer app-level request encryption layer, in the same
+  spirit as the encrypted login handshake `huami-token` already implements
+  for `/v2/registrations/tokens` (see `helpers.zepp_encrypt_payload` in that
+  library). If the plaintext-param endpoint is ever retired, that's the
+  scheme to reverse-engineer next; `huami_token/mi_crypto.py` (bundled with
+  the `huami-token` dependency) documents the broader Xiaomi/Huami
+  encryption scheme and would be the natural starting point.
+
+## Credits
+
+- Login handshake powered by [`huami-token`](https://codeberg.org/argrento/huami-token) (MIT).
+- Zepp track-data decoding ported from
+  [`rolandsz/Mi-Fit-and-Zepp-workout-exporter`](https://github.com/rolandsz/Mi-Fit-and-Zepp-workout-exporter)
+  (MIT), itself based on [`mireq/MiFitDataExport`](https://github.com/mireq/MiFitDataExport).
+
+## Disclaimer
+
+Unofficial client using a reverse-engineered Zepp cloud API. Not affiliated
+with or endorsed by Zepp Health / Huami. Use with your own account, at your
+own risk.

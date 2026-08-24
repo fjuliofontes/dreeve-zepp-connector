@@ -1,0 +1,147 @@
+# dreeve-zepp-connector
+
+## What this is
+
+A standalone Python CLI (not an MCP server) that pulls workouts from a Zepp /
+Amazfit cloud account and writes them as `.FIT` files into a local folder —
+intended to be [Dreeve](https://github.com/dreeveapp/dreeve)'s watch folder,
+alongside its existing [Garmin connector](https://github.com/dreeveapp/dreeve-garmin-connector).
+
+Why this exists: Garmin Connect lets you download a device's *original*
+`.FIT` file directly, so the Garmin connector just re-hosts a file Garmin
+already produced. Zepp has no equivalent export — its cloud API only returns
+JSON with per-sample track data encoded as delta-compressed strings. This
+tool decodes that raw format and *synthesizes* a `.FIT` file from it.
+
+Sibling project: `../zepp-mcp` (an MCP server exposing the same Zepp cloud
+data to AI agents). This project ported and extended `zepp-mcp`'s auth/fetch
+client rather than depending on it directly.
+
+## Architecture (current, v1)
+
+- **`zepp_client.py`** — Zepp cloud auth + fetch, ported from `zepp-mcp`'s
+  `huami_client.py` with its token-saving truncation of GPS/HR/altitude
+  fields removed (this project needs the full data). Paginates workout
+  history via a `trackid` cursor (`workouts_page()`/`data.next`) — the API
+  has no offset-based pagination.
+- **`decoder.py`** — decodes Zepp's encoded `longitude_latitude` /
+  `heart_rate` / `altitude` / `gait` / `time` fields into track points.
+  Ported (with attribution) from the MIT-licensed
+  `rolandsz/Mi-Fit-and-Zepp-workout-exporter`, itself based on
+  `mireq/MiFitDataExport` — this is the one place the actual encoding
+  scheme is documented; don't re-derive it from scratch.
+- **`fit_writer.py`** — builds `.FIT` bytes via the `fit-tool` PyPI library.
+  `TYPE_MAP` maps Zepp's numeric workout `type` codes to FIT `Sport`/
+  `SubSport`. Synthesizes placeholder records for track-less workouts
+  (strength, pool swims, table tennis, ...) — this is required, not
+  optional (see Known quirks below).
+- **`ledger.py`** — local JSON file (`OUTPUT_DIR/ledger.json`) tracking
+  already-exported `trackid`s so re-runs skip them.
+- **`main.py`** — CLI entrypoint (`--since`, `--limit`, `--output-dir`,
+  `--dry-run`). Pages back through history until either the `--since`
+  cutoff is covered or `--limit` total workouts are collected.
+
+## Known quirks / gotchas
+
+Documented here so they don't get silently re-broken or re-derived:
+
+- **Zepp's encoding**: `time`, both halves of `longitude_latitude`, and
+  `heart_rate`'s value column are delta-encoded (need cumulative sum);
+  `altitude` and `gait`'s stride/cadence columns are absolute but sampled on
+  their own irregular timestamps (need interpolation onto a unified
+  timeline). Lat/lon scale ÷1e8, altitude in centimeters. `NO_VALUE =
+  -2000000` is the sentinel for "no altitude reading at all."
+- **Interpolation artifacts**: the ported decoder interpolates gaps using
+  integer floor-division slopes (faithful to the upstream reference). Across
+  a wide gap between real samples this can under/overshoot into physically
+  impossible values (observed live: cadence of `-46`). `fit_writer._in_range`
+  clamps/drops these per-field rather than crashing.
+- **Mixed types from the API**: summary fields (`calorie`, `avg_heart_rate`,
+  `type`) come back as a mix of ints, floats, and numeric strings like
+  `"375.0"` across different workouts. Always route through `_to_int()`,
+  never a bare `int(...)`.
+- **Dreeve rejects record-less FIT files, unconditionally.** Confirmed
+  against Dreeve's own `FitFileParser.php`: it throws `"No FIT 'record'
+  messages found"` and rejects the file before it even looks at sport or
+  session data, regardless of how complete the Session/Lap summary is. This
+  is why `fit_writer.py` synthesizes a placeholder record stream (timestamp
+  + repeated avg heart rate + a linear distance ramp) for any workout with
+  no decoded GPS track — removing that would silently break every indoor/
+  strength/pool-swim/racket-sport export again.
+- **`huami-token`'s login hardcodes region `us2`/`US`** despite its own
+  README implying auto-resolution. First thing to check if login starts
+  failing for a specific account.
+- **A newer, encrypted API variant exists.** Live app traffic has been
+  observed calling region-specific hosts (e.g. `api-mifit-de2.zepp.com`)
+  with a single encrypted `cipher_data` query param instead of this tool's
+  plaintext `trackid`/`source`/`userid` params. Not implemented — the
+  plaintext endpoint still works as of 2026-08 — but it's the lead to chase
+  if that ever changes (see README's "Notes on the underlying API").
+- **Ball/team sports go through the same endpoint.** Volleyball, table
+  tennis, etc. all showed up via the normal `run/history.json` endpoint —
+  there's no separate "ball games" API as first suspected. A workout
+  "missing" from output is far more likely a wrong/stale `trackid` than a
+  real API gap — verify directly against the account before assuming a new
+  endpoint is needed.
+- **`TYPE_MAP` coverage** (extend as new codes surface — an unmapped type
+  prints a warning instead of failing silently):
+
+  | code | sport | code | sport |
+  |------|-------|------|-------|
+  | 1 | running | 16 | free training (generic) |
+  | 6 | walking | 17 | tennis |
+  | 8 | treadmill | 49 | strength training |
+  | 9 | outdoor cycling | 88 | volleyball |
+  | 10 | indoor cycling | 89 | table tennis |
+  | 14 | pool swimming | 140 | kayaking |
+  | 15 | open water swimming | 223 | generic movement |
+
+- **`--limit` default is 200.** A full historical backfill needs an
+  explicit higher `--limit` (or `--since all --limit <N>`) — 200 is a
+  reasonable cap for "catch up the last month or two" but will silently cap
+  a deep backfill.
+
+## V2 — pending, not yet built
+
+v1 deliberately scoped to a one-shot CLI (see the conversation history /
+original plan) rather than matching `dreeve-garmin-connector`'s full daemon
+architecture. Still to build, roughly in priority order:
+
+1. **Docker packaging** — `Dockerfile` + `docker-compose.yml` +
+   `docker-entrypoint.sh`, matching the Garmin connector's layout, so this
+   can run as a persistent service next to it.
+2. **Scheduled/continuous polling** — a `loop.py` equivalent: run on a
+   `POLL_INTERVAL` (env-configurable, default something like 3600s) instead
+   of relying on external cron. Should reuse `main.py`'s `run()` internals,
+   not duplicate them.
+3. **Health/status endpoints** — `/healthz` and `/status` HTTP endpoints
+   like the Garmin connector, for monitoring when run as a long-lived
+   container.
+4. **Rate-limit backoff** — exponential backoff on 429s from Zepp's API,
+   plus a `DOWNLOAD_DELAY_SECONDS`-style throttle between per-workout
+   `workout_detail()` calls (matters more once this runs unattended/on a
+   schedule against a large history).
+5. **`MAX_DOWNLOADS_PER_CYCLE`-style throttling** for large first-time
+   backfills, so a fresh deploy against years of history doesn't hammer the
+   API in one run — spread across cycles instead (same idea the Garmin
+   connector's `.env.example` documents).
+6. **Proper pool-swim fidelity (maybe)** — current synthetic-record
+   approach gets swims past Dreeve's import gate and shows correct
+   sport/duration/calories/avg-HR, but has no real per-length data
+   (`LengthMessage`, `pool_length`, `num_lengths`, SWOLF). Investigate
+   whether Zepp's API exposes lap-level swim data at all before investing
+   here — unconfirmed either way.
+7. **`cipher_data` endpoint support (fallback only)** — only needed if the
+   current plaintext detail endpoint stops working; see the quirk above.
+
+## Verification
+
+- `uv run pytest` — unit tests for decoder math (delta-decoding,
+  interpolation), pagination/cutoff logic (`fetch_workouts`), and
+  `fit_writer` edge cases (range clamping, decimal-string summary fields,
+  synthetic records for track-less workouts).
+- Live-tested end-to-end against a real Zepp account: 200 workouts (the
+  `--limit` default — there's more/older history beyond it, untested)
+  across the 14 `TYPE_MAP` sport types above exported cleanly, 0 failures,
+  imported successfully into a real Dreeve instance (including
+  previously-failing pool swims and other track-less activity types).

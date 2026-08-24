@@ -1,0 +1,8 @@
+{
+  "_comment": "Synthetic fixture matching Zepp's run/detail.json encoding (not real user data) - used to unit-test decoder.py deterministically. 3 samples at t=0,10,20s, all channels aligned on the same timeline so no interpolation is needed to verify the math.",
+  "time": "0;10;10",
+  "longitude_latitude": "4000000000,-7395000000;1000,1000;1000,1000",
+  "altitude": "1000;1100;1200",
+  "heart_rate": "0,120;10,10;10,20",
+  "gait": "0,0,80,170;10,0,82,180;10,0,81,160"
+}
