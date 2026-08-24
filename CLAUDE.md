@@ -134,6 +134,57 @@ architecture. Still to build, roughly in priority order:
 7. **`cipher_data` endpoint support (fallback only)** — only needed if the
    current plaintext detail endpoint stops working; see the quirk above.
 
+## Comparison: `effectpears/zepp-downloader` (reviewed 2026-08-24)
+
+A friend independently released [zepp-downloader](https://github.com/effectpears/zepp-downloader)
+(single-file script, tuned against an Amazfit Stratos 3), same goal as this
+project. Full comparison done by cloning and reading its source; findings
+below so they don't need re-deriving.
+
+**What we do better:**
+- Login via email/password (`huami-token`'s `ZeppSession`) vs. their
+  manual "pull the `apptoken` header out of devtools" flow.
+- Real historical backfill: our `fetch_workouts()` pages back through
+  history via the `trackid` cursor until `--since`/`--limit` is satisfied.
+  Theirs only ever fetches the single most recent `FETCH_LIMIT` (default
+  20) activities per run — no pagination, so it can only "catch up since
+  last cron tick," not backfill deep history.
+- Decoder fidelity: we delta-decode `time`, `heart_rate`, and both lat/lon
+  halves, and interpolate `altitude`/`gait` onto a unified timeline. Theirs
+  treats `heart_rate` as a flat non-delta int list — likely wrong for
+  devices/accounts where HR is delta-encoded like ours documents above.
+- Track-less workout placeholders: both synthesize records (Dreeve
+  requires a non-empty `record` stream), but ours ramps 60 points with
+  HR+distance; theirs only emits 1–2 records.
+
+**Real gaps worth considering (not yet acted on):**
+- No retry/backoff on HTTP calls at all in our `zepp_client._get()` — a
+  single flaky request just fails that workout. Theirs retries with
+  exponential backoff and gives specific 401/403/429 messages. Overlaps
+  with V2 item 4 below but is currently *fully unbuilt*, not just
+  unthrottled.
+- No lock file (`fcntl.flock`) preventing two overlapping runs from racing
+  on the ledger/output dir — matters once V2's scheduled polling exists.
+- No rotating file log (we only `print()`) — would help debugging once
+  this runs headless via cron/Docker.
+- `TYPE_MAP` coverage: they map several codes we don't — 7 (trail run), 11
+  (elliptical), 12 (indoor rowing), 13/16 (mountaineering), 18 (alpine
+  skiing), 19 (cross-country skiing), 20 (snowboarding), 24 (indoor
+  fitness), 27 (yoga), 39 (triathlon/multisport, with a `type % 1000`
+  prefix-strip for `1000 < type < 2000` composite-activity legs that we
+  don't handle at all).
+
+**⚠️ Type-code conflict to investigate — do not blindly merge their table:**
+their code **17 = HIKING**; ours (`fit_writer.TYPE_MAP`) has **17 =
+TENNIS**. Their script was tuned specifically for an Amazfit Stratos 3, so
+`type` codes may not be portable 1:1 across devices/firmware/app versions —
+same numeric code could mean different things depending on device
+generation. Before importing any of their mapping, verify actual `type`
+values seen from the account in question (per the "Ball/team sports" quirk
+above: confirm against real API responses, don't assume). Open question:
+is this a genuine per-device code collision, or did one of the two projects
+mis-map it?
+
 ## Verification
 
 - `uv run pytest` — unit tests for decoder math (delta-decoding,
