@@ -83,10 +83,13 @@ Documented here so they don't get silently re-broken or re-derived:
   `effectpears/zepp-downloader`'s `zepp_app_token.py` — three plain
   `requests` calls (registration -> access code -> login_token ->
   app_token) instead of `huami-token`'s encrypted mobile handshake.
-  Confirmed live (2026-08-26) not to disconnect the phone app. `huami-token`
-  is still a dependency, but now only for its `HEADERS.ZEPP_DEVICES`
-  constant used on data calls — not for login. Login's `country_code`
-  defaults to `"US"` (`ZEPP_COUNTRY` env var to override); the old
+  Confirmed live (2026-08-26) not to disconnect the phone app. Data-call
+  headers (`_DATA_HEADERS_TEMPLATE` in `zepp_client.py`) still use
+  `huami-token`'s Android-app identity (`com.huami.midong`) — confirmed to
+  accept a web-app-issued `app_token` fine despite the mismatch — but that
+  constant is now just inlined/ported (with attribution), not imported;
+  `huami-token` is no longer a runtime dependency at all. Login's
+  `country_code` defaults to `"US"` (`ZEPP_COUNTRY` env var to override); the old
   `huami-token`-hardcoded-region quirk no longer applies to login, but a
   wrong `ZEPP_COUNTRY` is now the first thing to check if login itself
   starts failing for a specific account.
@@ -179,9 +182,10 @@ below so they don't need re-deriving.
   (see the "Login flow" quirk above): it turned out `huami-token`'s
   `ZeppSession` login logs the phone app out, which their plain-`requests`
   web-app flow doesn't. We still keep the email/password UX (their
-  companion script prompts once and caches the resulting `app_token`,
-  ours logs in fresh each run); the underlying HTTP calls are now shared
-  lineage.
+  companion script prompts once and caches the resulting `app_token`
+  manually into `.env`; ours does the same caching automatically, into
+  `ledger.json` — see "`app_token` caching" quirk above); the underlying
+  HTTP calls are now shared lineage.
 - Real historical backfill: our `fetch_workouts()` pages back through
   history via the `trackid` cursor until `--since`/`--limit` is satisfied.
   Theirs only ever fetches the single most recent `FETCH_LIMIT` (default

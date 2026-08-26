@@ -10,10 +10,12 @@ login, which registers as an Android device (`app_name=com.huami.midong`,
 `device_model=android_phone`) and appears to kick the existing device's
 session as a side effect.
 
-Data queries are issued here against api-mifit.zepp.com with the resulting
-app_token, reusing `huami-token`'s `HEADERS.ZEPP_DEVICES` header template —
-that's just a header identity for data calls, unrelated to the login flow
-above, so it doesn't carry the same disconnect risk.
+Data queries are issued here against api-mifit.zepp.com with a header
+template (`_DATA_HEADERS_TEMPLATE` below) matching that same Android
+identity - confirmed (2026-08-26) to accept a web-app-issued app_token
+without issue, despite the identity mismatch. Ported from `huami-token`'s
+`HEADERS.ZEPP_DEVICES` constant (MIT); no longer a runtime dependency of
+this project.
 """
 
 from __future__ import annotations
@@ -26,8 +28,6 @@ from urllib.parse import parse_qs, quote, urlparse
 
 import requests
 
-from huami_token.constants import HEADERS
-
 DATA_HOST = "api-mifit.zepp.com"
 
 # Zepp's web-app login identity, as opposed to huami-token's mobile
@@ -39,13 +39,32 @@ _WEB_USER_AGENT = (
     "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 )
 
+# Android-app header identity used for data calls (history/detail), ported
+# from huami-token's `HEADERS.ZEPP_DEVICES` constant - see module docstring.
+_DATA_HEADERS_TEMPLATE = {
+    "hm-privacy-diagnostics": "false",
+    "country": "US",
+    "appplatform": "android_phone",
+    "hm-privacy-ceip": "true",
+    "timezone": "Europe/London",
+    "channel": "a100900101016",
+    "vb": "202509151347",
+    "cv": "151689_9.12.5",
+    "appname": "com.huami.midong",
+    "v": "2.0",
+    "vn": "9.12.5",
+    "lang": "en_US",
+    "user-agent": "Zepp/9.12.5 (Pixel 4; Android 12; Density/2.75)",
+    "accept-encoding": "gzip",
+}
+
 
 class ZeppClientError(RuntimeError):
     pass
 
 
 def _data_headers(app_token: str) -> dict:
-    h = HEADERS.ZEPP_DEVICES.value.copy()
+    h = _DATA_HEADERS_TEMPLATE.copy()
     h["apptoken"] = app_token
     h["x-request-id"] = str(uuid.uuid4())
     return h

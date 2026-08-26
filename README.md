@@ -75,16 +75,18 @@ knowing if it ever stops working:
   `cipher_data` query parameter instead of plaintext `trackid`/`source`/
   `userid` — likely a newer app-level request encryption layer. If the
   plaintext-param endpoint is ever retired, that's the scheme to
-  reverse-engineer next; `huami_token/mi_crypto.py` (bundled with the
-  `huami-token` dependency, still used here for header constants) documents
-  the broader Xiaomi/Huami encryption scheme and would be a starting point.
+  reverse-engineer next; `huami-token`'s `mi_crypto.py` module (MIT,
+  [codeberg.org/argrento/huami-token](https://codeberg.org/argrento/huami-token) —
+  not a dependency of this project, just a reference) documents the broader
+  Xiaomi/Huami encryption scheme and would be a starting point.
 
 ## Credits
 
 - Zepp web-app login flow ported from
   [`effectpears/zepp-downloader`](https://github.com/effectpears/zepp-downloader)'s
   `zepp_app_token.py`.
-- Data-call header constants from [`huami-token`](https://codeberg.org/argrento/huami-token) (MIT).
+- Data-call header identity ported from
+  [`huami-token`](https://codeberg.org/argrento/huami-token) (MIT).
 - Zepp track-data decoding ported from
   [`rolandsz/Mi-Fit-and-Zepp-workout-exporter`](https://github.com/rolandsz/Mi-Fit-and-Zepp-workout-exporter)
   (MIT), itself based on [`mireq/MiFitDataExport`](https://github.com/mireq/MiFitDataExport).
