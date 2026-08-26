@@ -22,6 +22,7 @@ class Config:
     output_dir: Path
     ledger_path: Path
     since: str | None
+    country: str
 
     @classmethod
     def from_env(cls, since_override: str | None = None, output_dir_override: str | None = None) -> "Config":
@@ -33,6 +34,7 @@ class Config:
         output_dir = Path(output_dir_override or os.environ.get("OUTPUT_DIR", "./output")).expanduser()
         ledger_path = Path(os.environ.get("LEDGER_PATH", output_dir / "ledger.json")).expanduser()
         since = since_override or os.environ.get("SINCE")
+        country = os.environ.get("ZEPP_COUNTRY", "US")
 
         return cls(
             email=email,
@@ -40,4 +42,5 @@ class Config:
             output_dir=output_dir,
             ledger_path=ledger_path,
             since=since,
+            country=country,
         )

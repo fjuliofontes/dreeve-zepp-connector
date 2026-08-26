@@ -1,34 +1,43 @@
 """
 Zepp / Amazfit cloud data client.
 
-Ported from zepp-mcp's `huami_client.py`, with the token-saving truncation
-of GPS/heart-rate/altitude track fields removed — this project needs the
-full encoded track strings to decode into FIT records.
+Login goes through Zepp's *web-app* flow (`com.huami.webapp`), ported (with
+attribution) from effectpears/zepp-downloader's `zepp_app_token.py`: three
+plain `requests` calls — email/password -> access code, access code ->
+login_token, login_token -> app_token. Confirmed (2026-08-26) not to log the
+user's phone app out, unlike the `huami-token` library's `ZeppSession`
+login, which registers as an Android device (`app_name=com.huami.midong`,
+`device_model=android_phone`) and appears to kick the existing device's
+session as a side effect.
 
-Login uses the maintained `huami-token` lib (handles the 2025 encrypted
-`api-user.zepp.com` handshake). Data queries are issued here against
-api-mifit.zepp.com with the app_token.
+Data queries are issued here against api-mifit.zepp.com with the resulting
+app_token, reusing `huami-token`'s `HEADERS.ZEPP_DEVICES` header template —
+that's just a header identity for data calls, unrelated to the login flow
+above, so it doesn't carry the same disconnect risk.
 """
 
 from __future__ import annotations
 
 import json
 import base64
-import sys
 import uuid
 from dataclasses import dataclass, field
+from urllib.parse import parse_qs, quote, urlparse
 
 import requests
-from loguru import logger
 
 from huami_token.constants import HEADERS
-from huami_token.zepp import ZeppSession
-
-# Silence the lib's DEBUG/INFO logging so credentials/tokens never hit stdout.
-logger.remove()
-logger.add(sys.stderr, level="WARNING")
 
 DATA_HOST = "api-mifit.zepp.com"
+
+# Zepp's web-app login identity, as opposed to huami-token's mobile
+# `com.huami.midong` identity (see module docstring).
+_WEB_APP_NAME = "com.huami.webapp"
+_WEB_REDIRECT_URI = "https://s3-us-west-2.amazonaws.com/hm-registration/successsignin.html"
+_WEB_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+)
 
 
 class ZeppClientError(RuntimeError):
@@ -42,38 +51,148 @@ def _data_headers(app_token: str) -> dict:
     return h
 
 
+def _web_login(http: requests.Session, email: str, password: str, country: str) -> tuple[str, str]:
+    """Zepp web-app login. Returns `(app_token, user_id)`; raises
+    `ZeppClientError` with the failing step and response body on failure."""
+    reg_headers = {
+        "app_name": _WEB_APP_NAME,
+        "content-type": "application/x-www-form-urlencoded",
+        "origin": "https://user.zepp.com",
+        "referer": "https://user.zepp.com/",
+        "x-request-id": str(uuid.uuid4()),
+    }
+    reg_resp = http.post(
+        f"https://api-user.huami.com/registrations/{quote(email, safe='')}/tokens",
+        data={
+            "client_id": "HuaMi",
+            "country_code": country,
+            "json_response": "true",
+            "name": email,
+            "password": password,
+            "redirect_uri": _WEB_REDIRECT_URI,
+            "state": "REDIRECTION",
+            "token": "access",
+        },
+        headers=reg_headers,
+        allow_redirects=False,
+    )
+
+    access_code = None
+    location = reg_resp.headers.get("Location", "")
+    if location:
+        access_code = parse_qs(urlparse(location).query).get("access", [None])[0]
+    if not access_code and reg_resp.status_code == 200:
+        try:
+            data = reg_resp.json()
+            access_code = data.get("access") or data.get("code")
+        except ValueError:
+            pass
+    if not access_code:
+        raise ZeppClientError(
+            f"login failed at registration step (HTTP {reg_resp.status_code}): {reg_resp.text[:300]}"
+        )
+
+    login_headers = {
+        "app_name": _WEB_APP_NAME,
+        "appname": _WEB_APP_NAME,
+        "appplatform": "web",
+        "origin": "https://user.zepp.com",
+        "referer": "https://user.zepp.com/",
+        "user-agent": _WEB_USER_AGENT,
+    }
+    login_resp = http.post(
+        "https://api-mifit.zepp.com/v2/client/login",
+        data={
+            "allow_registration": "false",
+            "app_name": _WEB_APP_NAME,
+            "app_version": "1.0.0",
+            "code": access_code,
+            "country_code": country,
+            "device_id": f"web_{uuid.uuid4()}",
+            "device_model": "web",
+            "dn": "api-mifit.zepp.com,api-user.zepp.com,api-watch.zepp.com,auth.zepp.com",
+            "grant_type": "access_token",
+            "source": _WEB_APP_NAME,
+            "third_name": "huami",
+        },
+        headers=login_headers,
+    )
+    try:
+        token_info = login_resp.json().get("token_info") or {}
+    except ValueError:
+        raise ZeppClientError(
+            f"login failed at token-exchange step (HTTP {login_resp.status_code}): {login_resp.text[:300]}"
+        )
+    login_token, user_id = token_info.get("login_token"), token_info.get("user_id")
+    if not login_token or not user_id:
+        raise ZeppClientError(f"login failed at token-exchange step: missing login_token/user_id in {token_info}")
+
+    token_resp = http.get(
+        "https://api-mifit.zepp.com/v1/client/app_tokens",
+        params={
+            "app_name": _WEB_APP_NAME,
+            "dn": "api-mifit.zepp.com,api-user.zepp.com,auth.zepp.com",
+            "login_token": login_token,
+        },
+        headers=login_headers,
+    )
+    try:
+        app_token = token_resp.json().get("token_info", {}).get("app_token")
+    except ValueError:
+        app_token = None
+    if not app_token:
+        raise ZeppClientError(
+            f"login failed at app-token step (HTTP {token_resp.status_code}): {token_resp.text[:300]}"
+        )
+
+    return app_token, str(user_id)
+
+
 @dataclass
 class ZeppDataClient:
     email: str
     password: str
-    session: ZeppSession | None = None
+    country: str = "US"
     _http: requests.Session = field(default_factory=requests.Session)
     _source_cache: dict[str, str] = field(default_factory=dict)
+    _app_token: str | None = field(default=None, init=False, repr=False)
+    _user_id: str | None = field(default=None, init=False, repr=False)
 
     # ---- auth -----------------------------------------------------------
 
     def login(self) -> None:
-        self.session = ZeppSession(self.email, self.password)
-        self.session.login()
+        self._app_token, self._user_id = _web_login(self._http, self.email, self.password, self.country)
+
+    def use_cached_auth(self, app_token: str, user_id: str) -> None:
+        """Skip login and reuse a previously obtained app_token/user_id
+        (e.g. from `Ledger.cached_auth()`). If it's actually expired, `_get()`
+        transparently re-logs-in on the first 401/403 it hits."""
+        self._app_token = app_token
+        self._user_id = user_id
 
     @property
     def app_token(self) -> str | None:
-        return self.session._app_token if self.session else None
+        return self._app_token
 
     @property
     def user_id(self) -> str | None:
-        return self.session._user_id if self.session else None
+        return self._user_id
 
     def _ensure(self) -> None:
-        if not self.session or not self.session._app_token:
+        if not self._app_token:
             self.login()
 
-    def _get(self, path: str, params: dict) -> dict:
+    def _get(self, path: str, params: dict, _retry: bool = True) -> dict:
         self._ensure()
         url = f"https://{DATA_HOST}{path}"
         r = self._http.get(
             url, headers=_data_headers(self.app_token), params=params, timeout=30
         )
+        if r.status_code in (401, 403) and _retry:
+            # Cached/expired token - drop it and let the next _ensure() log
+            # in fresh, then replay this call once.
+            self._app_token = None
+            return self._get(path, params, _retry=False)
         try:
             return r.json()
         except ValueError:

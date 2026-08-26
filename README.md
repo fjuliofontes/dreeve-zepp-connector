@@ -39,7 +39,10 @@ already imported older history some other way and just want to pick up from
 a point in time. Accepts an ISO date (`2026-07-24`), a relative offset
 (`-30d`), or `all` (default — no lower bound, subject to `--limit`).
 Already-exported workouts are tracked in a ledger file and always skipped on
-later runs regardless of `SINCE`.
+later runs regardless of `SINCE`. That same ledger file also caches the
+login token after a successful run, so later runs skip logging in again
+until the cached token is actually rejected — it's written `0600` since it
+now holds a live credential.
 
 ## Usage
 
@@ -63,25 +66,25 @@ knowing if it ever stops working:
 - **Regional hosts.** Live traffic from the official app has been observed
   hitting region-specific hosts too, e.g. `api-mifit-de2.zepp.com` for an
   EU-region account, rather than the unqualified `api-mifit.zepp.com` this
-  tool uses. `huami-token`'s login flow is similarly hardcoded to a `us2`
-  region (see `zepp_client.py`'s docstring) despite Zepp accounts being
-  sharded by region — the unqualified host has worked fine so far, but a
-  region mismatch is the first thing to suspect if login/fetch calls start
-  failing for a specific account.
+  tool uses. Login's `country_code` param (`ZEPP_COUNTRY` env var, default
+  `US`) is separate from this — the unqualified data host has worked fine
+  so far regardless of `ZEPP_COUNTRY`, but a region mismatch is the first
+  thing to suspect if fetch calls start failing for a specific account.
 - **A newer encrypted-payload scheme.** The same live traffic shows
   `/v1/sport/run/detail.json` being called with a single encrypted
   `cipher_data` query parameter instead of plaintext `trackid`/`source`/
-  `userid` — likely a newer app-level request encryption layer, in the same
-  spirit as the encrypted login handshake `huami-token` already implements
-  for `/v2/registrations/tokens` (see `helpers.zepp_encrypt_payload` in that
-  library). If the plaintext-param endpoint is ever retired, that's the
-  scheme to reverse-engineer next; `huami_token/mi_crypto.py` (bundled with
-  the `huami-token` dependency) documents the broader Xiaomi/Huami
-  encryption scheme and would be the natural starting point.
+  `userid` — likely a newer app-level request encryption layer. If the
+  plaintext-param endpoint is ever retired, that's the scheme to
+  reverse-engineer next; `huami_token/mi_crypto.py` (bundled with the
+  `huami-token` dependency, still used here for header constants) documents
+  the broader Xiaomi/Huami encryption scheme and would be a starting point.
 
 ## Credits
 
-- Login handshake powered by [`huami-token`](https://codeberg.org/argrento/huami-token) (MIT).
+- Zepp web-app login flow ported from
+  [`effectpears/zepp-downloader`](https://github.com/effectpears/zepp-downloader)'s
+  `zepp_app_token.py`.
+- Data-call header constants from [`huami-token`](https://codeberg.org/argrento/huami-token) (MIT).
 - Zepp track-data decoding ported from
   [`rolandsz/Mi-Fit-and-Zepp-workout-exporter`](https://github.com/rolandsz/Mi-Fit-and-Zepp-workout-exporter)
   (MIT), itself based on [`mireq/MiFitDataExport`](https://github.com/mireq/MiFitDataExport).

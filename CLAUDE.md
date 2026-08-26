@@ -21,7 +21,9 @@ client rather than depending on it directly.
 
 - **`zepp_client.py`** — Zepp cloud auth + fetch, ported from `zepp-mcp`'s
   `huami_client.py` with its token-saving truncation of GPS/HR/altitude
-  fields removed (this project needs the full data). Paginates workout
+  fields removed (this project needs the full data). Login goes through
+  Zepp's *web-app* flow (`com.huami.webapp`), not the `huami-token` lib's
+  `ZeppSession` — see the "Login flow" quirk below. Paginates workout
   history via a `trackid` cursor (`workouts_page()`/`data.next`) — the API
   has no offset-based pagination.
 - **`decoder.py`** — decodes Zepp's encoded `longitude_latitude` /
@@ -36,7 +38,10 @@ client rather than depending on it directly.
   (strength, pool swims, table tennis, ...) — this is required, not
   optional (see Known quirks below).
 - **`ledger.py`** — local JSON file (`OUTPUT_DIR/ledger.json`) tracking
-  already-exported `trackid`s so re-runs skip them.
+  already-exported `trackid`s so re-runs skip them. Also caches the last
+  successful `app_token`/`user_id` (keyed to `email`+`country`) so re-runs
+  skip the login network round-trip entirely unless the cached token
+  actually gets rejected — see "app_token caching" quirk below.
 - **`main.py`** — CLI entrypoint (`--since`, `--limit`, `--output-dir`,
   `--dry-run`). Pages back through history until either the `--since`
   cutoff is covered or `--limit` total workouts are collected.
@@ -68,9 +73,35 @@ Documented here so they don't get silently re-broken or re-derived:
   + repeated avg heart rate + a linear distance ramp) for any workout with
   no decoded GPS track — removing that would silently break every indoor/
   strength/pool-swim/racket-sport export again.
-- **`huami-token`'s login hardcodes region `us2`/`US`** despite its own
-  README implying auto-resolution. First thing to check if login starts
-  failing for a specific account.
+- **Login flow was switched off `huami-token`'s `ZeppSession` on
+  2026-08-26.** `ZeppSession.login()` registers as an Android device
+  (`app_name=com.huami.midong`, `device_model=android_phone`) and was found
+  to log the user's phone app out as a side effect — unacceptable since the
+  phone app is used alongside this connector. `zepp_client._web_login()`
+  replaces it with Zepp's *web-app* login (`app_name=com.huami.webapp`,
+  `device_model=web`), ported (with attribution) from
+  `effectpears/zepp-downloader`'s `zepp_app_token.py` — three plain
+  `requests` calls (registration -> access code -> login_token ->
+  app_token) instead of `huami-token`'s encrypted mobile handshake.
+  Confirmed live (2026-08-26) not to disconnect the phone app. `huami-token`
+  is still a dependency, but now only for its `HEADERS.ZEPP_DEVICES`
+  constant used on data calls — not for login. Login's `country_code`
+  defaults to `"US"` (`ZEPP_COUNTRY` env var to override); the old
+  `huami-token`-hardcoded-region quirk no longer applies to login, but a
+  wrong `ZEPP_COUNTRY` is now the first thing to check if login itself
+  starts failing for a specific account.
+- **`app_token` caching (added 2026-08-26).** `main.py` checks
+  `ledger.cached_auth()` before calling `client.login()` — if a token was
+  cached from a prior run for the same `email`+`country`, it's handed to
+  `client.use_cached_auth()` and the login network round-trip is skipped
+  entirely. `ZeppDataClient._get()` detects a rejected/expired token via a
+  401/403 response, drops it, and transparently re-logs-in once before
+  replaying the failed call — no explicit expiry/TTL tracking, purely
+  reactive. The refreshed (or first-ever) token is written back to
+  `ledger.json` at the end of a non-dry-run. Because `ledger.json` now holds
+  a live credential, `Ledger.save()` chmods it `0o600`; it was already
+  gitignored. Note this doesn't apply to `--dry-run`, which never touches
+  the ledger.
 - **A newer, encrypted API variant exists.** Live app traffic has been
   observed calling region-specific hosts (e.g. `api-mifit-de2.zepp.com`)
   with a single encrypted `cipher_data` query param instead of this tool's
@@ -142,8 +173,15 @@ project. Full comparison done by cloning and reading its source; findings
 below so they don't need re-deriving.
 
 **What we do better:**
-- Login via email/password (`huami-token`'s `ZeppSession`) vs. their
-  manual "pull the `apptoken` header out of devtools" flow.
+- Login via email/password vs. their original manual "pull the `apptoken`
+  header out of devtools" flow — though as of 2026-08-26 our login flow
+  itself now *is* their contributor's follow-up script, `zepp_app_token.py`
+  (see the "Login flow" quirk above): it turned out `huami-token`'s
+  `ZeppSession` login logs the phone app out, which their plain-`requests`
+  web-app flow doesn't. We still keep the email/password UX (their
+  companion script prompts once and caches the resulting `app_token`,
+  ours logs in fresh each run); the underlying HTTP calls are now shared
+  lineage.
 - Real historical backfill: our `fetch_workouts()` pages back through
   history via the `trackid` cursor until `--since`/`--limit` is satisfied.
   Theirs only ever fetches the single most recent `FETCH_LIMIT` (default

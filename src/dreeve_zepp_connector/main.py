@@ -85,14 +85,24 @@ def run() -> int:
     cfg.output_dir.mkdir(parents=True, exist_ok=True)
     ledger = Ledger(cfg.ledger_path)
 
-    client = ZeppDataClient(email=cfg.email, password=cfg.password)
-    try:
-        client.login()
-    except Exception as e:
-        print(f"login failed: {e}", file=sys.stderr)
-        return 1
+    client = ZeppDataClient(email=cfg.email, password=cfg.password, country=cfg.country)
+    cached_auth = ledger.cached_auth()
+    if cached_auth and cached_auth.get("email") == cfg.email and cached_auth.get("country") == cfg.country:
+        client.use_cached_auth(cached_auth["app_token"], cached_auth["user_id"])
+    else:
+        try:
+            client.login()
+        except Exception as e:
+            print(f"login failed: {e}", file=sys.stderr)
+            return 1
 
-    workouts = fetch_workouts(client, cutoff, limit=args.limit)
+    try:
+        workouts = fetch_workouts(client, cutoff, limit=args.limit)
+    except Exception as e:
+        # Most likely a stale cached token whose re-login (see
+        # ZeppDataClient._get) also failed - e.g. changed password.
+        print(f"failed to fetch workout history: {e}", file=sys.stderr)
+        return 1
 
     exported = skipped = failed = 0
     for summary in workouts:
@@ -127,6 +137,8 @@ def run() -> int:
             failed += 1
 
     if not args.dry_run:
+        if client.app_token and client.user_id:
+            ledger.set_auth(client.app_token, client.user_id, cfg.country, cfg.email)
         ledger.save()
 
     print(f"done: {exported} exported, {skipped} already synced, {failed} failed")

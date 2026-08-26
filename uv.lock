@@ -158,7 +158,6 @@ source = { editable = "." }
 dependencies = [
     { name = "fit-tool" },
     { name = "huami-token" },
-    { name = "loguru" },
     { name = "python-dotenv" },
     { name = "requests" },
 ]
@@ -172,7 +171,6 @@ dev = [
 requires-dist = [
     { name = "fit-tool", specifier = ">=0.9.13" },
     { name = "huami-token", specifier = ">=0.8.0" },
-    { name = "loguru", specifier = ">=0.7.3" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "requests", specifier = ">=2.34.2" },
 ]
