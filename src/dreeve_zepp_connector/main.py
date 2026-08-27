@@ -127,8 +127,11 @@ def run() -> int:
         try:
             detail = client.workout_detail(trackid, source=summary.get("source"))
             points = decoder.parse_points(int(trackid), detail)
+            splits = decoder.parse_kilometer_splits(detail)
             output_path = cfg.output_dir / filename
-            fit_writer.write_fit(summary, points, output_path)
+            device_id = summary.get("devicesource")
+            device_name = cfg.device_names.get(str(device_id)) if device_id is not None else None
+            fit_writer.write_fit(summary, points, output_path, splits=splits, device_name=device_name)
             ledger.mark(trackid, filename, datetime.now(tz=timezone.utc).isoformat())
             print(f"exported {filename} ({len(points)} track points)")
             exported += 1

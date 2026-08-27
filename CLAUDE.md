@@ -31,12 +31,24 @@ client rather than depending on it directly.
   Ported (with attribution) from the MIT-licensed
   `rolandsz/Mi-Fit-and-Zepp-workout-exporter`, itself based on
   `mireq/MiFitDataExport` — this is the one place the actual encoding
-  scheme is documented; don't re-derive it from scratch.
+  scheme is documented; don't re-derive it from scratch. Also decodes
+  `speed` / `currentDistance` / `power_meter` / `gait`'s stride column /
+  `kilo_pace` — these are *not* handled by that reference project at all
+  (it captures them as opaque strings, never decodes them), so this part is
+  this project's own reverse-engineering from live account data, not a
+  port — see the "speed/distance/power decoding" and "kilo_pace splits"
+  quirks below.
 - **`fit_writer.py`** — builds `.FIT` bytes via the `fit-tool` PyPI library.
   `TYPE_MAP` maps Zepp's numeric workout `type` codes to FIT `Sport`/
   `SubSport`. Synthesizes placeholder records for track-less workouts
   (strength, pool swims, table tennis, ...) — this is required, not
-  optional (see Known quirks below).
+  optional (see Known quirks below). Builds one `LapMessage` per completed
+  kilometer when `decoder.parse_kilometer_splits()` output looks consistent
+  with the workout's total distance, else a single whole-workout lap.
+  `_point_stats()` computes `max_speed`/`avg_cadence`/`max_cadence`/
+  `avg_step_length` from decoded points (session-wide and per-lap, via the
+  same helper) since the summary's own `avg_cadence`/`max_cadence` fields
+  are always 0 in practice.
 - **`ledger.py`** — local JSON file (`OUTPUT_DIR/ledger.json`) tracking
   already-exported `trackid`s so re-runs skip them. Also caches the last
   successful `app_token`/`user_id` (keyed to `email`+`country`) so re-runs
@@ -56,6 +68,75 @@ Documented here so they don't get silently re-broken or re-derived:
   their own irregular timestamps (need interpolation onto a unified
   timeline). Lat/lon scale ÷1e8, altitude in centimeters. `NO_VALUE =
   -2000000` is the sentinel for "no altitude reading at all."
+- **`speed`/`currentDistance`/`power_meter` decoding (added 2026-08-27,
+  reverse-engineered, not from the upstream reference project).** Same
+  `;`-delimited/`<delta_time>,<value>`-pair shape as `heart_rate`, but
+  *unlike* `heart_rate` the value column is already absolute — only the
+  time column needs cumulative summing. **`currentDistance`'s value column
+  is centimeters, like `altitude`** — easy to miss since the raw sample
+  values (e.g. `95.00000`) look like plausible meters at a glance; confirmed
+  live when a real 20km ride decoded as 2017km without the `/100`. `speed`
+  is already m/s, no conversion needed (cross-checked against a real ride's
+  `dis`/`run_time` average). `power_meter` carries a Zepp-computed
+  *running*-power estimate (watts) — confirmed live: present with a running
+  workout whose summary `average_power` was populated, empty for a cycling
+  workout on the same account with no paired power meter
+  (`average_power: -1`). A workout showing no power in the output is far
+  more likely "device never recorded it" than a decoding bug — check the
+  workout's own `average_power`/`max_power` summary fields (sentinel `-1`
+  means absent) before assuming otherwise. A field that's completely absent
+  for a given workout must decode to `None` for every point, not `0` —
+  `interpolate_column` fills an empty channel with zeros, so
+  `decoder.parse_points()` checks emptiness before interpolation runs.
+- **`kilo_pace` per-kilometer splits (added 2026-08-27, reverse-engineered,
+  not from the upstream reference project — most speculative of these
+  additions).** `;`-separated entries, one per *completed* kilometer only
+  (validated across many real workouts: entry count always equals
+  `floor(total_distance_m / 1000)` exactly). Each entry is a `,`-separated
+  tuple; only `field[0]` (0-based split index), `field[4]` (that split's avg
+  heart rate), and `field[6]` (that split's precise duration in
+  milliseconds — `field[1]`, a rounded-seconds duration, is
+  `floor(field[6]/1000)` for every entry checked) are used. `field[2]` looks
+  like a geohash of the split-boundary location; `field[3]` and `field[7:]`
+  are unconfirmed and deliberately left unused rather than guessed at.
+  `decoder.parse_kilometer_splits()` bails out to `[]` (never raises) on any
+  unexpected shape, and `fit_writer._build_laps()` additionally cross-checks
+  split count against the workout's total distance before trusting
+  it — either gate failing falls back to a single whole-workout lap rather
+  than emit a wrong split.
+- **There is no device-model field anywhere in Zepp's workout API data.**
+  Checked live across summary and detail responses — `deviceid`/`sn` are
+  opaque serial numbers, nothing human-readable. Confirmed against a real
+  Zepp-app-exported FIT file too: its `DeviceInfoMessage.product_name`
+  ("Amazfit Balance 2") comes from the phone app's local Bluetooth-pairing
+  knowledge, not anything present in the cloud API this project talks to —
+  so there's no way to recover it server-side, ever. `ZEPP_DEVICE_NAMES`
+  (env var, see `config.py`'s `_parse_device_names()`) is the only option:
+  a user-supplied `device_id=name;device_id=name` mapping, keyed by the
+  summary's `devicesource` field (stable per physical device, also embedded
+  in `source`, e.g. `run.9568513.huami.com`) — supports accounts with more
+  than one watch. Still just a static value the user sets, never
+  auto-detected.
+- **FIT's `cadence` field uses a single-leg convention; Zepp's `gait`
+  cadence is total steps/min (both feet).** Confirmed live: our raw decoded
+  avg/max cadence (159/174) was almost exactly 2x a real Zepp-app FIT
+  export's (79/88) for the same running workout. `fit_writer._fit_cadence()`
+  halves it. This conversion is applied only where cadence is written to
+  FIT output — `decoder.ExportablePoint.cadence` stays the true, undivided
+  steps/min value, since that's the more useful raw decoded fact.
+- **Swimming's cadence (stroke rate) comes from a completely different
+  field, `stroke_speed`, not `gait`.** `gait` is empty for swims (no
+  footpod underwater) — confirmed live, which is why swim exports had no
+  cadence chart at all before this was added. `stroke_speed` is empty for
+  runs/rides (confirmed live too - genuinely mutually exclusive per
+  workout). Format is the same `<delta_time>,<value>` pairing as
+  `speed`/`power_meter`, in strokes/second; `decoder.parse_track_data()`
+  applies ×60 for strokes/minute. Unlike `gait`'s cadence, this needs *no*
+  further halving for FIT output — confirmed live: our decoded ×60 values
+  matched a real Zepp-app FIT export's per-record cadence sequence exactly
+  ([16,16,16,16,16,19,19,...] both sides). `fit_writer._fit_cadence()`
+  picks whichever of `point.cadence` (halved) / `point.stroke_cadence`
+  (used as-is) is present — they're never both set for the same workout.
 - **Interpolation artifacts**: the ported decoder interpolates gaps using
   integer floor-division slopes (faithful to the upstream reference). Across
   a wide gap between real samples this can under/overshoot into physically
@@ -230,11 +311,43 @@ mis-map it?
 ## Verification
 
 - `uv run pytest` — unit tests for decoder math (delta-decoding,
-  interpolation), pagination/cutoff logic (`fetch_workouts`), and
-  `fit_writer` edge cases (range clamping, decimal-string summary fields,
-  synthetic records for track-less workouts).
+  interpolation, speed/distance/power decoding, `kilo_pace` split parsing),
+  pagination/cutoff logic (`fetch_workouts`), and `fit_writer` edge cases
+  (range clamping, decimal-string summary fields, synthetic records for
+  track-less workouts, per-kilometer lap building and its single-lap
+  fallback, device-info opt-in).
 - Live-tested end-to-end against a real Zepp account: 200 workouts (the
   `--limit` default — there's more/older history beyond it, untested)
   across the 14 `TYPE_MAP` sport types above exported cleanly, 0 failures,
   imported successfully into a real Dreeve instance (including
   previously-failing pool swims and other track-less activity types).
+- **Speed/power/distance/lap additions (2026-08-27) validated against real
+  account data**: built actual `.FIT` files for a real cycling and running
+  workout, re-parsed them with `fit_tool` and checked the decoded values -
+  distance matched the summary's `dis` field within ~1m over 6-20km,
+  `total_work` (computed from integrated power) matched `average_power ×
+  duration` within rounding, per-km lap paces were physically plausible,
+  and the cycling workout correctly showed no power data (matching its
+  `average_power: -1`) while the running workout showed real watts. Also
+  smoke-tested `build_fit()` against 42 real workouts sampled across all 17
+  distinct `type` codes present in the account (3 per type) - 0 exceptions.
+- **Cross-checked against 3 real `.FIT` files exported by the Zepp app
+  itself** (open water swim, cycling, running - same account, same
+  workouts as above) - by far the strongest validation available, since
+  it's the official product's own output, not just internal consistency
+  checks. Confirmed: `kilo_pace`-derived lap count matches exactly (21 and
+  7 laps); `total_distance` matches within ~1cm; device manufacturer ID
+  (339) matches `Manufacturer.ZEPP`; `max_speed`, `max_heart_rate`, and
+  `avg_step_length` now match exactly after being added; running cadence
+  was found and fixed to be 2x too high (see the cadence-convention quirk
+  above) before it matched; the swim's cadence chart was found to be
+  entirely missing (the `gait` field is empty for swims - no footpod
+  underwater) and fixed by decoding `stroke_speed` instead (see the
+  "stroke rate" quirk above) - per-record cadence sequence then matched
+  exactly. One deliberate difference: **the official
+  export leaves `total_work` unset for the running workout despite having
+  `avg_power`/`max_power` populated** - possibly Zepp doesn't trust a
+  running-power *estimate* enough to publish a derived energy figure. This
+  project's `total_work` (computed by integrating decoded power) was kept
+  anyway, per explicit user decision (2026-08-27) - flagging here in case
+  that's revisited.

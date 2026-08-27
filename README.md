@@ -6,7 +6,8 @@ watch folder, alongside its existing [Garmin connector](https://github.com/dreev
 
 Unlike the Garmin connector, Zepp's API has no native `.FIT` export — this
 tool decodes Zepp's raw per-sample track data (GPS, heart rate, altitude,
-cadence) and synthesizes a `.FIT` file from it.
+cadence for both running and swimming, speed, running power, step length,
+per-kilometer splits) and synthesizes a `.FIT` file from it.
 
 ## Status
 
@@ -43,6 +44,14 @@ later runs regardless of `SINCE`. That same ledger file also caches the
 login token after a successful run, so later runs skip logging in again
 until the cached token is actually rejected — it's written `0600` since it
 now holds a live credential.
+
+`ZEPP_DEVICE_NAMES` (optional) maps device IDs to names for each `.FIT`
+file's device info. Zepp's API doesn't expose the recording device's model
+anywhere in workout data, so this can't be auto-detected — leave it unset
+and files just won't carry a device name. Format: `<device_id>=<name>`,
+semicolon-separated for accounts with more than one watch. Find a
+workout's `device_id` in its `devicesource` field (also embedded in
+`source`, e.g. `run.9568513.huami.com` → `9568513`).
 
 ## Usage
 
