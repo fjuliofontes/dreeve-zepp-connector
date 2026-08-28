@@ -44,17 +44,63 @@ _WORKOUT_FALLBACK = (Sport.FITNESS_EQUIPMENT, SubSport.GENERIC)
 TYPE_MAP: dict[int, tuple[Sport, SubSport]] = {
     1: (Sport.RUNNING, SubSport.GENERIC),
     6: (Sport.WALKING, SubSport.GENERIC),
+    7: (Sport.RUNNING, SubSport.TRAIL),          # Trailrunning
     8: (Sport.RUNNING, SubSport.TREADMILL),
     9: (Sport.CYCLING, SubSport.GENERIC),
     10: (Sport.CYCLING, SubSport.INDOOR_CYCLING),
+    11: (Sport.FITNESS_EQUIPMENT, SubSport.ELLIPTICAL),
+    13: (Sport.MOUNTAINEERING, SubSport.GENERIC),
     14: (Sport.SWIMMING, SubSport.LAP_SWIMMING),
     15: (Sport.SWIMMING, SubSport.OPEN_WATER),
     16: _WORKOUT_FALLBACK,  # "free training" in the app
     17: (Sport.TENNIS, SubSport.GENERIC),
+    18: (Sport.SOCCER, SubSport.GENERIC), 
+    19: (Sport.CROSS_COUNTRY_SKIING, SubSport.GENERIC), 
+    21: (Sport.JUMP_ROPE, SubSport.GENERIC),
+    22: (Sport.HIKING, SubSport.GENERIC),  
+    23: (Sport.FITNESS_EQUIPMENT, SubSport.INDOOR_ROWING), 
+    24: (Sport.FITNESS_EQUIPMENT, SubSport.GENERIC),    # Indoor Fitness
+    27: (Sport.TRAINING, SubSport.YOGA),    
+    39: (Sport.MULTISPORT, SubSport.GENERIC),
+    42: (Sport.SNOWBOARDING, SubSport.GENERIC),    
+    47: (Sport.CYCLING, SubSport.MOUNTAIN),      # MTB
     49: (Sport.TRAINING, SubSport.STRENGTH_TRAINING),
+    70: (Sport.ROCK_CLIMBING, SubSport.GENERIC),
+    71: (Sport.GENERIC, SubSport.GENERIC), #Ballet
+    72: (Sport.GENERIC, SubSport.GENERIC), #Bauchtanz
+    73: (Sport.GENERIC, SubSport.GENERIC), #Squaredance
+    74: (Sport.GENERIC, SubSport.GENERIC), #Street Dance
+    75: (Sport.GENERIC, SubSport.GENERIC), #Turniertanz
+    76: (Sport.GENERIC, SubSport.GENERIC), #Tanzen
+    77: (Sport.GENERIC, SubSport.GENERIC), #Zumba
+    78: (Sport.CRICKET, SubSport.GENERIC), #Cricket
+    79: (Sport.BASEBALL, SubSport.GENERIC), #Baseball
+    80: (Sport.GENERIC, SubSport.GENERIC), #Bowling
+    81: (Sport.RACKET, SubSport.SQUASH), #Squash
+    82: (Sport.RUGBY, SubSport.GENERIC), #Rugby
+    85: (Sport.BASKETBALL, SubSport.GENERIC), #Basketball
+    86: (Sport.BASEBALL, SubSport.GENERIC), #Softball
+    87: (Sport.GENERIC, SubSport.GENERIC), #Gateball
     88: (Sport.VOLLEYBALL, SubSport.GENERIC),
     89: (Sport.RACKET, SubSport.TABLE_TENNIS),
+    90: (Sport.FIELD_HOCKEY, SubSport.GENERIC), #Hockey
+    91: (Sport.HANDBALL, SubSport.GENERIC), #Handball
+    92: (Sport.RACKET, SubSport.BADMINTON), #Badminton      
+    93: (Sport.ARCHERY, SubSport.GENERIC), 
+    94: (Sport.GENERIC, SubSport.GENERIC), #equestrian
+    96: (Sport.GENERIC, SubSport.GENERIC), #Karate
+    97: (Sport.BOXING, SubSport.GENERIC), #Boxen
+    98: (Sport.GENERIC, SubSport.GENERIC), #Judo
+    99: (Sport.GENERIC, SubSport.GENERIC), #Ringen
+    100: (Sport.GENERIC, SubSport.GENERIC), #Tai Chi
+    101: (Sport.GENERIC, SubSport.GENERIC), #Muay Thai
+    102: (Sport.GENERIC, SubSport.GENERIC), #Taekwondo
+    103: (Sport.GENERIC, SubSport.GENERIC), #Kampfsport
+    104: (Sport.GENERIC, SubSport.GENERIC), #Kickboxen
+    105: (Sport.ALPINE_SKIING, SubSport.RESORT),
     140: (Sport.KAYAKING, SubSport.GENERIC),
+    148: (Sport.GENERIC, SubSport.GENERIC), #Fechten
+    178: (Sport.SNOWSHOEING, SubSport.GENERIC),
     223: _WORKOUT_FALLBACK,  # "just movement" in the app
 }
 _warned_types: set[int] = set()
