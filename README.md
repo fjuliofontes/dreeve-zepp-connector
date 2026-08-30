@@ -105,7 +105,7 @@ To run a one-shot command in the container instead of the loop, override
 the command:
 
 ```bash
-docker compose run --rm dreeve-zepp-connector uv run dreeve-zepp-connector --dry-run
+docker compose run --rm dreeve-zepp-connector uv run --frozen --no-dev dreeve-zepp-connector --dry-run
 ```
 
 Additional env vars for unattended/large-backfill use:
