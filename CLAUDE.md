@@ -222,17 +222,54 @@ Documented here so they don't get silently re-broken or re-derived:
   real API gap — verify directly against the account before assuming a new
   endpoint is needed.
 - **`TYPE_MAP` coverage** (extend as new codes surface — an unmapped type
-  prints a warning instead of failing silently):
+  prints a warning instead of failing silently). The original 14 codes below
+  (1–17, 49, 88/89, 140, 223) were verified against this project's own
+  account per the Verification section; codes 18–178 were added in
+  `f96943c` (2026-08-28, contributed by @effectpears) from
+  `zepp-downloader`'s broader table and **have not been cross-checked
+  against a real account showing those `type` values** — same caveat as the
+  "⚠️ Type-code conflict" callout below: a code correct for one
+  device/firmware/app version may not be portable. Two entries in that
+  commit referenced `Sport` enum members that don't exist in `fit-tool`
+  0.9.16 (`FIELD_HOCKEY`, `HANDBALL`) and crashed *every* import of
+  `fit_writer.py` — not just workouts with those types, since `TYPE_MAP` is
+  a dict literal evaluated at module-import time — until fixed 2026-08-30
+  (`Sport.HOCKEY`, and `Sport.TEAM_SPORT` for handball, which has no
+  dedicated FIT value). `tests/test_fit_writer.py`'s
+  `test_type_map_covers_every_code_with_valid_fit_tool_enum_members` now
+  builds a `.FIT` file for every `TYPE_MAP` code so a bad enum member fails
+  `uv run pytest` immediately instead of surfacing at deploy time.
 
   | code | sport | code | sport |
   |------|-------|------|-------|
-  | 1 | running | 16 | free training (generic) |
-  | 6 | walking | 17 | tennis |
-  | 8 | treadmill | 49 | strength training |
-  | 9 | outdoor cycling | 88 | volleyball |
-  | 10 | indoor cycling | 89 | table tennis |
-  | 14 | pool swimming | 140 | kayaking |
-  | 15 | open water swimming | 223 | generic movement |
+  | 1 | running | 79 | baseball |
+  | 6 | walking | 80 | bowling (generic) |
+  | 7 | trail running | 81 | squash |
+  | 8 | treadmill | 82 | rugby |
+  | 9 | outdoor cycling | 85 | basketball |
+  | 10 | indoor cycling | 86 | softball (baseball) |
+  | 11 | elliptical | 87 | gateball (generic) |
+  | 13 | mountaineering | 88 | volleyball |
+  | 14 | pool swimming | 89 | table tennis |
+  | 15 | open water swimming | 90 | hockey |
+  | 16 | free training (generic) | 91 | handball (team sport, generic) |
+  | 17 | tennis | 92 | badminton |
+  | 18 | soccer | 93 | archery |
+  | 19 | cross-country skiing | 94 | equestrian (generic) |
+  | 21 | jump rope | 96 | karate (generic) |
+  | 22 | hiking | 97 | boxing |
+  | 23 | indoor rowing | 98 | judo (generic) |
+  | 24 | indoor fitness (generic) | 99 | wrestling (generic) |
+  | 27 | yoga | 100 | tai chi (generic) |
+  | 39 | multisport | 101 | muay thai (generic) |
+  | 42 | snowboarding | 102 | taekwondo (generic) |
+  | 47 | mountain biking | 103 | martial arts (generic) |
+  | 49 | strength training | 104 | kickboxing (generic) |
+  | 70 | rock climbing | 105 | alpine skiing (resort) |
+  | 71–77 | dance styles (generic) | 140 | kayaking |
+  | 78 | cricket | 148 | fencing (generic) |
+  |  |  | 178 | snowshoeing |
+  |  |  | 223 | generic movement |
 
 - **`--limit` default is 200** (env `LIMIT`). A full historical backfill
   needs an explicit higher `--limit`/`LIMIT` (or `--since all --limit <N>`)

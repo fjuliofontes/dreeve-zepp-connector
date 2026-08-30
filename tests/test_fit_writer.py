@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from fit_tool.fit_file import FitFile
 
 from dreeve_zepp_connector.decoder import ExportablePoint, KilometerSplit
-from dreeve_zepp_connector.fit_writer import build_fit
+from dreeve_zepp_connector.fit_writer import TYPE_MAP, build_fit
 
 START_TRACKID = 1_700_000_000
 
@@ -316,3 +316,23 @@ def test_build_fit_emits_device_info_only_when_name_given():
     device_infos = _messages(data_with, "DeviceInfoMessage")
     assert len(device_infos) == 1
     assert device_infos[0].product_name == "My Watch"
+
+
+def test_type_map_covers_every_code_with_valid_fit_tool_enum_members():
+    # Every (Sport, SubSport) pair in TYPE_MAP is evaluated at *module import
+    # time* (it's a dict literal), so a typo'd enum member (e.g.
+    # `Sport.FIELD_HOCKEY` - not a real fit-tool value, `Sport.HOCKEY` is)
+    # crashes every import of this module, not just the workout that would
+    # have used it. This test additionally exercises build_fit() for each
+    # code, matching the manual smoke test described in CLAUDE.md's
+    # Verification section, to catch a valid-but-wrong mapping too.
+    for zepp_type in TYPE_MAP:
+        summary = {
+            "trackid": str(START_TRACKID),
+            "type": zepp_type,
+            "dis": 1000,
+            "calorie": 100,
+            "avg_heart_rate": 120,
+            "run_time": "600",
+        }
+        build_fit(summary, [])

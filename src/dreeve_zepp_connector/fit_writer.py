@@ -83,8 +83,8 @@ TYPE_MAP: dict[int, tuple[Sport, SubSport]] = {
     87: (Sport.GENERIC, SubSport.GENERIC), #Gateball
     88: (Sport.VOLLEYBALL, SubSport.GENERIC),
     89: (Sport.RACKET, SubSport.TABLE_TENNIS),
-    90: (Sport.FIELD_HOCKEY, SubSport.GENERIC), #Hockey
-    91: (Sport.HANDBALL, SubSport.GENERIC), #Handball
+    90: (Sport.HOCKEY, SubSport.GENERIC), #Hockey
+    91: (Sport.TEAM_SPORT, SubSport.GENERIC), #Handball - no dedicated FIT Sport value
     92: (Sport.RACKET, SubSport.BADMINTON), #Badminton      
     93: (Sport.ARCHERY, SubSport.GENERIC), 
     94: (Sport.GENERIC, SubSport.GENERIC), #equestrian
