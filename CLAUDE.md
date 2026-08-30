@@ -49,14 +49,37 @@ client rather than depending on it directly.
   `avg_step_length` from decoded points (session-wide and per-lap, via the
   same helper) since the summary's own `avg_cadence`/`max_cadence` fields
   are always 0 in practice.
-- **`ledger.py`** — local JSON file (`OUTPUT_DIR/ledger.json`) tracking
-  already-exported `trackid`s so re-runs skip them. Also caches the last
-  successful `app_token`/`user_id` (keyed to `email`+`country`) so re-runs
-  skip the login network round-trip entirely unless the cached token
-  actually gets rejected — see "app_token caching" quirk below.
-- **`main.py`** — CLI entrypoint (`--since`, `--limit`, `--output-dir`,
+- **`ledger.py`** — local JSON file (`STATE_DIR/ledger.json` by default,
+  deliberately separate from `WATCH_DIR` — see the "WATCH_DIR vs STATE_DIR"
+  quirk below) tracking already-exported `trackid`s so re-runs skip them.
+  Also caches the last successful `app_token`/`user_id` (keyed to
+  `email`+`country`) so re-runs skip the login network round-trip entirely
+  unless the cached token actually gets rejected — see "app_token caching"
+  quirk below.
+- **`main.py`** — CLI entrypoint (`--since`, `--limit`, `--watch-dir`,
   `--dry-run`). Pages back through history until either the `--since`
-  cutoff is covered or `--limit` total workouts are collected.
+  cutoff is covered or `--limit` total workouts are collected. `run()`
+  itself only does argv parsing, config/client/ledger setup, and printing —
+  the actual fetch+export cycle is `sync(cfg, client, ledger, dry_run)`,
+  factored out so `loop.py` (below) can call it repeatedly against one
+  already-authenticated `client`/`ledger` pair without re-parsing argv or
+  re-logging-in each cycle.
+- **`loop.py`** (v2) — continuous daemon: calls `main.sync()` on a
+  `POLL_INTERVAL`-second cadence (env, default 3600) instead of relying on
+  external cron. Does the same cached-auth-or-login resolution as
+  `main.run()` once up front, then reuses that `client`/`ledger` across
+  cycles. Starts a `health.HealthServer`, and traps `SIGTERM`/`SIGINT` to
+  finish the in-flight cycle and shut the health server down cleanly (so
+  `docker stop` doesn't kill it mid-write). This is the Docker image's
+  default command; `dreeve-zepp-connector` (the one-shot CLI) is still
+  available by overriding the container command.
+- **`health.py`** (v2) — stdlib-only (`http.server`) `/healthz` (liveness,
+  always `200` while the process is up) and `/status` (JSON: cycle count,
+  last cycle's timing/result, last error) endpoints, for monitoring when
+  `loop.py` runs as a long-lived container. `HealthState` is a small
+  lock-guarded snapshot written by the loop thread and read by the HTTP
+  handler's thread. No web-framework dependency added — two JSON routes
+  didn't justify one.
 
 ## Known quirks / gotchas
 
@@ -211,42 +234,87 @@ Documented here so they don't get silently re-broken or re-derived:
   | 14 | pool swimming | 140 | kayaking |
   | 15 | open water swimming | 223 | generic movement |
 
-- **`--limit` default is 200.** A full historical backfill needs an
-  explicit higher `--limit` (or `--since all --limit <N>`) — 200 is a
-  reasonable cap for "catch up the last month or two" but will silently cap
-  a deep backfill.
+- **`--limit` default is 200** (env `LIMIT`). A full historical backfill
+  needs an explicit higher `--limit`/`LIMIT` (or `--since all --limit <N>`)
+  — 200 is a reasonable cap for "catch up the last month or two" but will
+  silently cap a deep backfill.
+- **`WATCH_DIR` (env, was `OUTPUT_DIR` pre-2026-08-30) vs `STATE_DIR` (env,
+  new) are deliberately separate directories**, matching
+  `dreeve-garmin-connector`'s convention: `WATCH_DIR` is Dreeve's watch
+  folder and should contain nothing but `.FIT` files; `STATE_DIR` (default
+  `./state`) holds `ledger.json` (already-exported `trackid`s + the cached
+  login credential) so it's never mistaken for a workout file or swept up
+  by whatever's watching `WATCH_DIR`. `LEDGER_PATH` still overrides the
+  ledger's exact file path independently of `STATE_DIR` if needed. Both
+  `main.run()` and `loop.run()` `mkdir(parents=True, exist_ok=True)` both
+  directories on startup — `Ledger.save()` would create `STATE_DIR` anyway
+  on first write, but creating it eagerly matters for Docker (an empty
+  volume mount needs to exist for `/status` to look right before the first
+  cycle finishes).
+- **`docker-compose.yml`'s published health port must be kept in sync via
+  `${HEALTH_PORT:-8080}` in *two* places, not one (added 2026-08-30, after
+  hardcoding it broke on a host with something else already on 8080).**
+  Compose reads `.env` for its own `${VAR}` substitution (used in the
+  `ports:` mapping) completely separately from the `env_file: - .env`
+  directive that populates the *container's* environment - a shell-exported
+  `HEALTH_PORT` (not written into the `.env` file) satisfies the first but
+  not the second. So `HEALTH_PORT: ${HEALTH_PORT:-8080}` is listed
+  explicitly under `environment:` too, not left to `env_file` pass-through
+  alone - otherwise the host-side port mapping and the app's actual
+  listening port can silently diverge (container never becomes reachable on
+  the "wrong" port). If this ever needs a `docker run` invocation without
+  compose, `-p $HEALTH_PORT:$HEALTH_PORT -e HEALTH_PORT` both still need
+  setting for the same reason. Don't need `/healthz`/`/status` reachable
+  from outside the container at all? Drop the `ports:` section entirely -
+  Docker's own `HEALTHCHECK` runs inside the container's network namespace
+  and doesn't need the port published to work.
+- **Rate-limit backoff lives only in `ZeppDataClient._get()`, not
+  `_web_login()`.** `_get()` retries connection errors and HTTP 429s with
+  exponential backoff (`ZEPP_RETRY_BASE_DELAY * 2**attempt`, env
+  `ZEPP_MAX_RETRIES` caps attempts, default 5/2.0s), honoring a 429's
+  `Retry-After` header when present. Login's three plain `requests` calls
+  are unchanged — login failures are auth-shaped (bad password/country),
+  not rate-limit-shaped, so retrying them blindly would just mask a real
+  credential problem. The existing reactive 401/403-drop-token-and-relogin
+  behavior in `_get()` is a separate, orthogonal path (one-shot, no
+  backoff) — added first during v1, untouched by the v2 backoff work.
+- **`MAX_DOWNLOADS_PER_CYCLE` needs no cursor/offset bookkeeping across
+  cycles.** `sync()` just breaks out of its per-workout loop once the cap
+  is hit; whatever's left in that cycle's `workouts` list simply isn't in
+  the ledger yet, so the *next* `sync()` call re-fetches the same
+  newest-first list and `ledger.has()` transparently skips everything
+  already exported, picking up right where the last cycle left off. This
+  also applies during `--dry-run` (the cap breaks the loop either way) —
+  only `DOWNLOAD_DELAY_SECONDS`' actual `time.sleep()` is skipped in
+  dry-run, since dry-run never calls `workout_detail()` to begin with.
+- **`health.py`'s `/healthz` is a liveness check, not a correctness
+  check.** It returns `200` as long as the process/HTTP server is up,
+  regardless of whether the last sync cycle failed - `/status`'s
+  `last_error`/`last_result` is where cycle-level failures actually show
+  up. A container can be "healthy" while every cycle is failing (e.g. bad
+  credentials) - that's intentional (liveness vs. readiness are different
+  questions) but worth knowing when wiring up alerting on `/status` instead
+  of just the `HEALTHCHECK`.
 
-## V2 — pending, not yet built
+## V2 — daemon hardening (built) / still pending
 
-v1 deliberately scoped to a one-shot CLI (see the conversation history /
-original plan) rather than matching `dreeve-garmin-connector`'s full daemon
-architecture. Still to build, roughly in priority order:
+Items 1–5 below (Docker packaging, scheduled polling, health endpoints,
+rate-limit backoff, per-cycle throttling) are now built — see `loop.py`,
+`health.py`, the `Config`/`ZeppDataClient` fields listed above, and the
+Docker files (`Dockerfile`, `docker-compose.yml`, `docker-entrypoint.sh`).
+`dreeve-garmin-connector` (the layout this was modeled on) wasn't available
+locally while building this, so file/env-var naming follows what this
+document already specified, not a literal copy of that repo.
 
-1. **Docker packaging** — `Dockerfile` + `docker-compose.yml` +
-   `docker-entrypoint.sh`, matching the Garmin connector's layout, so this
-   can run as a persistent service next to it.
-2. **Scheduled/continuous polling** — a `loop.py` equivalent: run on a
-   `POLL_INTERVAL` (env-configurable, default something like 3600s) instead
-   of relying on external cron. Should reuse `main.py`'s `run()` internals,
-   not duplicate them.
-3. **Health/status endpoints** — `/healthz` and `/status` HTTP endpoints
-   like the Garmin connector, for monitoring when run as a long-lived
-   container.
-4. **Rate-limit backoff** — exponential backoff on 429s from Zepp's API,
-   plus a `DOWNLOAD_DELAY_SECONDS`-style throttle between per-workout
-   `workout_detail()` calls (matters more once this runs unattended/on a
-   schedule against a large history).
-5. **`MAX_DOWNLOADS_PER_CYCLE`-style throttling** for large first-time
-   backfills, so a fresh deploy against years of history doesn't hammer the
-   API in one run — spread across cycles instead (same idea the Garmin
-   connector's `.env.example` documents).
-6. **Proper pool-swim fidelity (maybe)** — current synthetic-record
+Still pending, deliberately not attempted blind:
+
+1. **Proper pool-swim fidelity (maybe)** — current synthetic-record
    approach gets swims past Dreeve's import gate and shows correct
    sport/duration/calories/avg-HR, but has no real per-length data
    (`LengthMessage`, `pool_length`, `num_lengths`, SWOLF). Investigate
    whether Zepp's API exposes lap-level swim data at all before investing
    here — unconfirmed either way.
-7. **`cipher_data` endpoint support (fallback only)** — only needed if the
+2. **`cipher_data` endpoint support (fallback only)** — only needed if the
    current plaintext detail endpoint stops working; see the quirk above.
 
 ## Comparison: `effectpears/zepp-downloader` (reviewed 2026-08-24)
@@ -312,10 +380,21 @@ mis-map it?
 
 - `uv run pytest` — unit tests for decoder math (delta-decoding,
   interpolation, speed/distance/power decoding, `kilo_pace` split parsing),
-  pagination/cutoff logic (`fetch_workouts`), and `fit_writer` edge cases
+  pagination/cutoff logic (`fetch_workouts`), `fit_writer` edge cases
   (range clamping, decimal-string summary fields, synthetic records for
   track-less workouts, per-kilometer lap building and its single-lap
-  fallback, device-info opt-in).
+  fallback, device-info opt-in), `ZeppDataClient._get()`'s retry/backoff
+  (429 + `Retry-After`, connection errors, retry exhaustion, 401/403
+  orthogonality), `health.HealthState`/`HealthServer` (including a real
+  `ThreadingHTTPServer` on an OS-assigned port), and `sync()`'s
+  `DOWNLOAD_DELAY_SECONDS`/`MAX_DOWNLOADS_PER_CYCLE` throttling.
+- **v2 daemon hardening (2026-08-30) live-tested**: ran
+  `python -m dreeve_zepp_connector.loop` against the real account
+  (`POLL_INTERVAL=8`, `LIMIT=1`) — confirmed `/healthz` and `/status`
+  responded correctly mid-run, a real new workout was fetched/exported on
+  the first cycle and correctly reported as `already synced` (not
+  re-downloaded) on subsequent cycles, and `SIGINT` triggered a clean
+  "finish current cycle, stop health server, exit" shutdown.
 - Live-tested end-to-end against a real Zepp account: 200 workouts (the
   `--limit` default — there's more/older history beyond it, untested)
   across the 14 `TYPE_MAP` sport types above exported cleanly, 0 failures,

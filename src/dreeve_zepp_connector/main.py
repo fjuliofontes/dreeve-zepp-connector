@@ -4,12 +4,21 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from . import decoder, fit_writer
 from .config import Config, ConfigError
 from .ledger import Ledger
 from .zepp_client import ZeppDataClient
+
+
+@dataclass
+class SyncResult:
+    exported: int
+    skipped: int
+    failed: int
 
 
 def parse_since(since: str | None) -> datetime | None:
@@ -58,54 +67,22 @@ def fetch_workouts(
     return collected[:limit]
 
 
-def run() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--since",
-        help='ISO date (e.g. 2026-07-24), "-Nd" offset (e.g. -30d), or "all" (default: no lower bound — '
-        "everything up to --limit)",
-    )
-    parser.add_argument(
-        "--limit",
-        type=int,
-        default=200,
-        help="max workouts to fetch in total, paging back through history as needed (default 200)",
-    )
-    parser.add_argument("--output-dir", help="folder to write .FIT files into (Dreeve's watch folder)")
-    parser.add_argument("--dry-run", action="store_true", help="list what would be exported, write nothing")
-    args = parser.parse_args()
-
-    try:
-        cfg = Config.from_env(since_override=args.since, output_dir_override=args.output_dir)
-    except ConfigError as e:
-        print(f"error: {e}", file=sys.stderr)
-        return 1
-
+def sync(cfg: Config, client: ZeppDataClient, ledger: Ledger, dry_run: bool = False) -> SyncResult:
+    """One fetch+export cycle against an already-authenticated `client`.
+    Shared by the one-shot CLI (`run()`, below) and `loop.py`'s recurring
+    poll - callers own login/ledger persistence."""
     cutoff = parse_since(cfg.since)
-    cfg.output_dir.mkdir(parents=True, exist_ok=True)
-    ledger = Ledger(cfg.ledger_path)
-
-    client = ZeppDataClient(email=cfg.email, password=cfg.password, country=cfg.country)
-    cached_auth = ledger.cached_auth()
-    if cached_auth and cached_auth.get("email") == cfg.email and cached_auth.get("country") == cfg.country:
-        client.use_cached_auth(cached_auth["app_token"], cached_auth["user_id"])
-    else:
-        try:
-            client.login()
-        except Exception as e:
-            print(f"login failed: {e}", file=sys.stderr)
-            return 1
 
     try:
-        workouts = fetch_workouts(client, cutoff, limit=args.limit)
+        workouts = fetch_workouts(client, cutoff, limit=cfg.limit)
     except Exception as e:
         # Most likely a stale cached token whose re-login (see
         # ZeppDataClient._get) also failed - e.g. changed password.
         print(f"failed to fetch workout history: {e}", file=sys.stderr)
-        return 1
+        return SyncResult(exported=0, skipped=0, failed=1)
 
     exported = skipped = failed = 0
-    for summary in workouts:
+    for i, summary in enumerate(workouts):
         trackid = summary.get("trackid")
         if not trackid:
             continue
@@ -119,33 +96,95 @@ def run() -> int:
             continue
 
         filename = _filename_for(summary, start_time)
-        if args.dry_run:
+        if dry_run:
             print(f"(dry-run) would export {filename}")
             exported += 1
-            continue
+        else:
+            try:
+                detail = client.workout_detail(trackid, source=summary.get("source"))
+                points = decoder.parse_points(int(trackid), detail)
+                splits = decoder.parse_kilometer_splits(detail)
+                output_path = cfg.watch_dir / filename
+                device_id = summary.get("devicesource")
+                device_name = cfg.device_names.get(str(device_id)) if device_id is not None else None
+                fit_writer.write_fit(summary, points, output_path, splits=splits, device_name=device_name)
+                ledger.mark(trackid, filename, datetime.now(tz=timezone.utc).isoformat())
+                print(f"exported {filename} ({len(points)} track points)")
+                exported += 1
+            except Exception as e:
+                print(f"failed to export workout {trackid}: {e}", file=sys.stderr)
+                failed += 1
 
-        try:
-            detail = client.workout_detail(trackid, source=summary.get("source"))
-            points = decoder.parse_points(int(trackid), detail)
-            splits = decoder.parse_kilometer_splits(detail)
-            output_path = cfg.output_dir / filename
-            device_id = summary.get("devicesource")
-            device_name = cfg.device_names.get(str(device_id)) if device_id is not None else None
-            fit_writer.write_fit(summary, points, output_path, splits=splits, device_name=device_name)
-            ledger.mark(trackid, filename, datetime.now(tz=timezone.utc).isoformat())
-            print(f"exported {filename} ({len(points)} track points)")
-            exported += 1
-        except Exception as e:
-            print(f"failed to export workout {trackid}: {e}", file=sys.stderr)
-            failed += 1
+            if cfg.download_delay_seconds:
+                time.sleep(cfg.download_delay_seconds)
 
-    if not args.dry_run:
+        if cfg.max_downloads_per_cycle and exported >= cfg.max_downloads_per_cycle:
+            remaining = len(workouts) - (i + 1)
+            if remaining:
+                print(
+                    f"reached MAX_DOWNLOADS_PER_CYCLE ({cfg.max_downloads_per_cycle}); "
+                    f"{remaining} workout(s) deferred to the next cycle"
+                )
+            break
+
+    if not dry_run:
         if client.app_token and client.user_id:
             ledger.set_auth(client.app_token, client.user_id, cfg.country, cfg.email)
         ledger.save()
 
-    print(f"done: {exported} exported, {skipped} already synced, {failed} failed")
-    return 1 if failed else 0
+    return SyncResult(exported=exported, skipped=skipped, failed=failed)
+
+
+def run() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--since",
+        help='ISO date (e.g. 2026-07-24), "-Nd" offset (e.g. -30d), or "all" (default: no lower bound — '
+        "everything up to --limit)",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="max workouts to fetch in total, paging back through history as needed (default 200, or LIMIT env)",
+    )
+    parser.add_argument("--watch-dir", help="folder to write .FIT files into (Dreeve's watch folder)")
+    parser.add_argument("--dry-run", action="store_true", help="list what would be exported, write nothing")
+    args = parser.parse_args()
+
+    try:
+        cfg = Config.from_env(
+            since_override=args.since, watch_dir_override=args.watch_dir, limit_override=args.limit
+        )
+    except ConfigError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+    cfg.watch_dir.mkdir(parents=True, exist_ok=True)
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    ledger = Ledger(cfg.ledger_path)
+
+    client = ZeppDataClient(
+        email=cfg.email,
+        password=cfg.password,
+        country=cfg.country,
+        max_retries=cfg.max_retries,
+        retry_base_delay=cfg.retry_base_delay,
+    )
+    cached_auth = ledger.cached_auth()
+    if cached_auth and cached_auth.get("email") == cfg.email and cached_auth.get("country") == cfg.country:
+        client.use_cached_auth(cached_auth["app_token"], cached_auth["user_id"])
+    else:
+        try:
+            client.login()
+        except Exception as e:
+            print(f"login failed: {e}", file=sys.stderr)
+            return 1
+
+    result = sync(cfg, client, ledger, dry_run=args.dry_run)
+
+    print(f"done: {result.exported} exported, {result.skipped} already synced, {result.failed} failed")
+    return 1 if result.failed else 0
 
 
 if __name__ == "__main__":

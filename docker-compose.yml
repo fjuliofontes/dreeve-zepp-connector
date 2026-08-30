@@ -1,0 +1,15 @@
+services:
+  dreeve-zepp-connector:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      WATCH_DIR: /watch
+      STATE_DIR: /state
+      HEALTH_PORT: ${HEALTH_PORT:-8080}
+    volumes:
+      - ./output:/watch
+      - ./state:/state
+    ports:
+      - "${HEALTH_PORT:-8080}:${HEALTH_PORT:-8080}"

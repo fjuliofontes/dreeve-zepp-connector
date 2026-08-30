@@ -17,6 +17,7 @@ dev = [
 
 [project.scripts]
 dreeve-zepp-connector = "dreeve_zepp_connector.main:run"
+dreeve-zepp-connector-loop = "dreeve_zepp_connector.loop:run"
 
 [build-system]
 requires = ["hatchling"]

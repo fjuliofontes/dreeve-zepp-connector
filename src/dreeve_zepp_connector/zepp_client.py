@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import base64
+import time
 import uuid
 from dataclasses import dataclass, field
 from urllib.parse import parse_qs, quote, urlparse
@@ -172,6 +173,8 @@ class ZeppDataClient:
     email: str
     password: str
     country: str = "US"
+    max_retries: int = 5
+    retry_base_delay: float = 2.0
     _http: requests.Session = field(default_factory=requests.Session)
     _source_cache: dict[str, str] = field(default_factory=dict)
     _app_token: str | None = field(default=None, init=False, repr=False)
@@ -201,21 +204,47 @@ class ZeppDataClient:
         if not self._app_token:
             self.login()
 
+    def _backoff_delay(self, attempt: int, retry_after: str | None = None) -> float:
+        if retry_after is not None:
+            try:
+                return float(retry_after)
+            except ValueError:
+                pass
+        return self.retry_base_delay * (2**attempt)
+
     def _get(self, path: str, params: dict, _retry: bool = True) -> dict:
         self._ensure()
         url = f"https://{DATA_HOST}{path}"
-        r = self._http.get(
-            url, headers=_data_headers(self.app_token), params=params, timeout=30
-        )
-        if r.status_code in (401, 403) and _retry:
-            # Cached/expired token - drop it and let the next _ensure() log
-            # in fresh, then replay this call once.
-            self._app_token = None
-            return self._get(path, params, _retry=False)
-        try:
-            return r.json()
-        except ValueError:
-            raise ZeppClientError(f"{path} -> {r.status_code} non-JSON: {r.text[:300]}")
+
+        for attempt in range(self.max_retries + 1):
+            try:
+                r = self._http.get(
+                    url, headers=_data_headers(self.app_token), params=params, timeout=30
+                )
+            except requests.exceptions.RequestException as e:
+                if attempt >= self.max_retries:
+                    raise ZeppClientError(f"{path} failed after {attempt + 1} attempts: {e}")
+                time.sleep(self._backoff_delay(attempt))
+                continue
+
+            if r.status_code == 429:
+                if attempt >= self.max_retries:
+                    raise ZeppClientError(f"{path} -> 429 after {attempt + 1} attempts, giving up")
+                time.sleep(self._backoff_delay(attempt, retry_after=r.headers.get("Retry-After")))
+                continue
+
+            if r.status_code in (401, 403) and _retry:
+                # Cached/expired token - drop it and let the next _ensure() log
+                # in fresh, then replay this call once.
+                self._app_token = None
+                return self._get(path, params, _retry=False)
+
+            try:
+                return r.json()
+            except ValueError:
+                raise ZeppClientError(f"{path} -> {r.status_code} non-JSON: {r.text[:300]}")
+
+        raise ZeppClientError(f"{path} failed after {self.max_retries + 1} attempts")
 
     # ---- data -----------------------------------------------------------
 
