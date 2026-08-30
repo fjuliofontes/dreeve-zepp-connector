@@ -58,9 +58,10 @@ now holds a live credential.
 file's device info. Zepp's API doesn't expose the recording device's model
 anywhere in workout data, so this can't be auto-detected — leave it unset
 and files just won't carry a device name. Format: `<device_id>=<name>`,
-semicolon-separated for accounts with more than one watch. Find a
-workout's `device_id` in its `devicesource` field (also embedded in
-`source`, e.g. `run.9568513.huami.com` → `9568513`).
+semicolon-separated for accounts with more than one watch. To find your
+device ID(s), run `uv run dreeve-zepp-connector --dry-run` — it prints each
+workout as `(dry-run) would export ... (device_id=9568513)` without
+exporting anything.
 
 ## Usage
 

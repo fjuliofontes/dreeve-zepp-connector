@@ -96,8 +96,12 @@ def sync(cfg: Config, client: ZeppDataClient, ledger: Ledger, dry_run: bool = Fa
             continue
 
         filename = _filename_for(summary, start_time)
+        device_id = summary.get("devicesource")
         if dry_run:
-            print(f"(dry-run) would export {filename}")
+            # Printing device_id here (not just in the real export path)
+            # doubles as the way to discover it for ZEPP_DEVICE_NAMES - no
+            # extra API call needed, --dry-run already fetches summaries.
+            print(f"(dry-run) would export {filename} (device_id={device_id})")
             exported += 1
         else:
             try:
@@ -105,7 +109,6 @@ def sync(cfg: Config, client: ZeppDataClient, ledger: Ledger, dry_run: bool = Fa
                 points = decoder.parse_points(int(trackid), detail)
                 splits = decoder.parse_kilometer_splits(detail)
                 output_path = cfg.watch_dir / filename
-                device_id = summary.get("devicesource")
                 device_name = cfg.device_names.get(str(device_id)) if device_id is not None else None
                 fit_writer.write_fit(summary, points, output_path, splits=splits, device_name=device_name)
                 ledger.mark(trackid, filename, datetime.now(tz=timezone.utc).isoformat())
