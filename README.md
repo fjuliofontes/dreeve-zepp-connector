@@ -54,14 +54,18 @@ login token after a successful run, so later runs skip logging in again
 until the cached token is actually rejected — it's written `0600` since it
 now holds a live credential.
 
-`ZEPP_DEVICE_NAMES` (optional) maps device IDs to names for each `.FIT`
-file's device info. Zepp's API doesn't expose the recording device's model
-anywhere in workout data, so this can't be auto-detected — leave it unset
-and files just won't carry a device name. Format: `<device_id>=<name>`,
-semicolon-separated for accounts with more than one watch. To find your
-device ID(s), run `uv run dreeve-zepp-connector --dry-run` — it prints each
-workout as `(dry-run) would export ... (device_id=9568513)` without
-exporting anything.
+Common devices get a name in each `.FIT` file's device info automatically,
+resolved from a built-in `deviceSource` → model table (Zepp's API doesn't
+expose the recording device's model anywhere in workout data itself, so
+this comes from a static table sourced from Zepp's own developer docs, not
+your account). `ZEPP_DEVICE_NAMES` (optional) overrides that table's name
+for a device, or adds one it doesn't know about. Format:
+`<device_id>=<name>`, semicolon-separated for accounts with more than one
+watch. To find your device ID(s) (and see what name, if any, already
+resolves for them), run `uv run dreeve-zepp-connector --dry-run` — it
+prints each workout as `(dry-run) would export ... (Amazfit Balance 2
+device_id=9568513)`, or without the name if the device isn't in the
+built-in table, without exporting anything.
 
 ## Usage
 

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from dreeve_zepp_connector.config import Config, _parse_device_names
+from dreeve_zepp_connector.known_devices import KNOWN_DEVICE_NAMES
 
 
 def _set_required_env(monkeypatch):
@@ -116,6 +117,32 @@ def test_watch_dir_override_wins_over_env(monkeypatch, tmp_path):
     cfg = Config.from_env(watch_dir_override=str(tmp_path / "cli-watch"))
 
     assert cfg.watch_dir == tmp_path / "cli-watch"
+
+
+def test_device_names_falls_back_to_known_devices_table(monkeypatch):
+    _set_required_env(monkeypatch)
+    monkeypatch.delenv("ZEPP_DEVICE_NAMES", raising=False)
+
+    cfg = Config.from_env()
+
+    # 9568513 is an Amazfit Balance 2 per Zepp's own device-list docs -
+    # should resolve without the user setting ZEPP_DEVICE_NAMES at all.
+    assert cfg.device_names["9568513"] == "Amazfit Balance 2"
+    assert cfg.device_names == KNOWN_DEVICE_NAMES
+
+
+def test_zepp_device_names_overrides_known_devices_table(monkeypatch):
+    _set_required_env(monkeypatch)
+    # 9568513 is "Amazfit Balance 2" in the built-in table - an explicit
+    # env entry for the same ID should win.
+    monkeypatch.setenv("ZEPP_DEVICE_NAMES", "9568513=My Custom Name;1234567=Unlisted Watch")
+
+    cfg = Config.from_env()
+
+    assert cfg.device_names["9568513"] == "My Custom Name"
+    assert cfg.device_names["1234567"] == "Unlisted Watch"
+    # Every other known device is still present, untouched.
+    assert cfg.device_names["7930113"] == "Amazfit GTR 4"
 
 
 def test_ledger_path_override_is_independent_of_state_dir(monkeypatch, tmp_path):

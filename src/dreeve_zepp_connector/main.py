@@ -97,11 +97,16 @@ def sync(cfg: Config, client: ZeppDataClient, ledger: Ledger, dry_run: bool = Fa
 
         filename = _filename_for(summary, start_time)
         device_id = summary.get("devicesource")
+        device_name = cfg.device_names.get(str(device_id)) if device_id is not None else None
         if dry_run:
             # Printing device_id here (not just in the real export path)
             # doubles as the way to discover it for ZEPP_DEVICE_NAMES - no
             # extra API call needed, --dry-run already fetches summaries.
-            print(f"(dry-run) would export {filename} (device_id={device_id})")
+            # device_name is whatever KNOWN_DEVICE_NAMES/ZEPP_DEVICE_NAMES
+            # already resolves it to, so an unset ZEPP_DEVICE_NAMES entry
+            # doesn't mean "unknown" if the built-in table covers it.
+            device_label = f"{device_name} " if device_name else ""
+            print(f"(dry-run) would export {filename} ({device_label}device_id={device_id})")
             exported += 1
         else:
             try:
@@ -109,7 +114,6 @@ def sync(cfg: Config, client: ZeppDataClient, ledger: Ledger, dry_run: bool = Fa
                 points = decoder.parse_points(int(trackid), detail)
                 splits = decoder.parse_kilometer_splits(detail)
                 output_path = cfg.watch_dir / filename
-                device_name = cfg.device_names.get(str(device_id)) if device_id is not None else None
                 fit_writer.write_fit(summary, points, output_path, splits=splits, device_name=device_name)
                 ledger.mark(trackid, filename, datetime.now(tz=timezone.utc).isoformat())
                 print(f"exported {filename} ({len(points)} track points)")

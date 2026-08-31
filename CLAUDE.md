@@ -134,12 +134,44 @@ Documented here so they don't get silently re-broken or re-derived:
   ("Amazfit Balance 2") comes from the phone app's local Bluetooth-pairing
   knowledge, not anything present in the cloud API this project talks to —
   so there's no way to recover it server-side, ever. `ZEPP_DEVICE_NAMES`
-  (env var, see `config.py`'s `_parse_device_names()`) is the only option:
-  a user-supplied `device_id=name;device_id=name` mapping, keyed by the
-  summary's `devicesource` field (stable per physical device, also embedded
-  in `source`, e.g. `run.9568513.huami.com`) — supports accounts with more
-  than one watch. Still just a static value the user sets, never
-  auto-detected.
+  (env var, see `config.py`'s `_parse_device_names()`) used to be the only
+  option: a user-supplied `device_id=name;device_id=name` mapping, keyed by
+  the summary's `devicesource` field (stable per physical device, also
+  embedded in `source`, e.g. `run.9568513.huami.com`) — supports accounts
+  with more than one watch. **`known_devices.py` (added 2026-08-31)** now
+  covers this for common devices without any env var: a static
+  `deviceSource` → model-name table scraped from Zepp's own device-list
+  docs (https://docs.zepp.com/docs/1.0/reference/related-resources/device-list/),
+  parsed from that page's raw server-rendered HTML (not an AI summary) for
+  accuracy — 103 entries, no ID collisions. `config.py` merges it as a
+  fallback under `ZEPP_DEVICE_NAMES`, so an explicit env entry still
+  overrides or adds to it. Confirmed live: also tried hitting
+  `huami-token`'s plaintext `GET
+  https://api-mifit.zepp.com/users/{user_id}/devices` endpoint (same
+  `_data_headers()`/`DATA_HOST` auth this project already uses, just a
+  different path) against a real account — works, returns each device's
+  `deviceSource`/`productId`/`deviceId`/`sn`, but still **no human-readable
+  model name field**, so calling it at runtime wouldn't add anything over
+  the static table; not wired up. Also tried `market/devices/{id}/watch/builtin`
+  directly (the endpoint the URL with `cipher_data` on `api-mifit-de2.zepp.com`
+  pointed at) — turns out the `cipher_data` param isn't actually required:
+  a plain `GET https://api-mifit.zepp.com/market/devices/{deviceSource}/watch/builtin`
+  with this project's existing auth headers also returns `200`, on both
+  `api-mifit.zepp.com` and `api-mifit-de2.zepp.com`. But it's the wrong
+  endpoint for this anyway — confirmed live against all 3 real devices on
+  the test account, response shape is
+  `[{"id":0,"name":"","builtin_id":0,"image":"","device_image":"<url>","official_builtin":false}]`
+  with `name` empty for every device. This is the device's *builtin
+  watchface market listing* (`name` would be a watchface's name, not the
+  watch's), not a device-identity lookup — the only per-device-distinct
+  field is `device_image` (a product photo URL), not a usable text name.
+  So: no endpoint anywhere in Zepp's cloud API, plaintext or cipher, at any
+  of these hosts, exposes the device model as a string — `known_devices.py`
+  (a static table, not a live lookup) is confirmed to be the only path
+  short of `ZEPP_DEVICE_NAMES`. The table is necessarily incomplete (new
+  devices ship after 2026-08-31, and
+  non-Zepp-OS devices are only partially documented on that page) —
+  `ZEPP_DEVICE_NAMES` remains how to cover anything it's missing.
 - **FIT's `cadence` field uses a single-leg convention; Zepp's `gait`
   cadence is total steps/min (both feet).** Confirmed live: our raw decoded
   avg/max cadence (159/174) was almost exactly 2x a real Zepp-app FIT

@@ -8,6 +8,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from .known_devices import KNOWN_DEVICE_NAMES
+
 load_dotenv()
 
 
@@ -78,7 +80,10 @@ class Config:
         since = since_override or os.environ.get("SINCE")
         limit = limit_override if limit_override is not None else int(os.environ.get("LIMIT", "200"))
         country = os.environ.get("ZEPP_COUNTRY", "US")
-        device_names = _parse_device_names(os.environ.get("ZEPP_DEVICE_NAMES"))
+        # KNOWN_DEVICE_NAMES covers common devices out of the box (see its
+        # module docstring for the source); ZEPP_DEVICE_NAMES overrides or
+        # adds entries it doesn't know about.
+        device_names = {**KNOWN_DEVICE_NAMES, **_parse_device_names(os.environ.get("ZEPP_DEVICE_NAMES"))}
         max_retries = int(os.environ.get("ZEPP_MAX_RETRIES", "5"))
         retry_base_delay = float(os.environ.get("ZEPP_RETRY_BASE_DELAY", "2.0"))
         download_delay_seconds = float(os.environ.get("DOWNLOAD_DELAY_SECONDS", "0"))
