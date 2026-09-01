@@ -6,7 +6,7 @@ import argparse
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from . import decoder, fit_writer
 from .config import Config, ConfigError
@@ -28,8 +28,8 @@ def parse_since(since: str | None) -> datetime | None:
         return None
     if since.startswith("-") and since.endswith("d"):
         days = int(since[1:-1])
-        return datetime.now(tz=timezone.utc) - timedelta(days=days)
-    return datetime.fromisoformat(since).replace(tzinfo=timezone.utc)
+        return datetime.now(tz=UTC) - timedelta(days=days)
+    return datetime.fromisoformat(since).replace(tzinfo=UTC)
 
 
 def _filename_for(summary: dict, start_time: datetime) -> str:
@@ -38,9 +38,7 @@ def _filename_for(summary: dict, start_time: datetime) -> str:
     return f"{start_time.strftime('%Y-%m-%dT%H-%M-%SZ')}_{trackid}_{zepp_type}.fit"
 
 
-def fetch_workouts(
-    client: ZeppDataClient, cutoff: datetime | None, limit: int, page_size: int = 100
-) -> list[dict]:
+def fetch_workouts(client: ZeppDataClient, cutoff: datetime | None, limit: int, page_size: int = 100) -> list[dict]:
     """Page back through workout history (newest-first) until `limit`
     workouts are collected or a page's oldest workout is already older than
     `cutoff` — whichever comes first. Zepp's history endpoint pages via a
@@ -51,16 +49,14 @@ def fetch_workouts(
     collected: list[dict] = []
     cursor: int | str | None = None
     while len(collected) < limit:
-        items, cursor = client.workouts_page(
-            limit=min(page_size, limit - len(collected)), before_trackid=cursor
-        )
+        items, cursor = client.workouts_page(limit=min(page_size, limit - len(collected)), before_trackid=cursor)
         if not items:
             break
         collected.extend(items)
 
         trackids = [int(w["trackid"]) for w in items if w.get("trackid")]
         oldest = min(trackids) if trackids else None
-        if cutoff and oldest is not None and datetime.fromtimestamp(oldest, tz=timezone.utc) < cutoff:
+        if cutoff and oldest is not None and datetime.fromtimestamp(oldest, tz=UTC) < cutoff:
             break
         if cursor is None:
             break
@@ -87,7 +83,7 @@ def sync(cfg: Config, client: ZeppDataClient, ledger: Ledger, dry_run: bool = Fa
         if not trackid:
             continue
         trackid = str(trackid)
-        start_time = datetime.fromtimestamp(int(trackid), tz=timezone.utc)
+        start_time = datetime.fromtimestamp(int(trackid), tz=UTC)
 
         if ledger.has(trackid):
             skipped += 1
@@ -115,7 +111,7 @@ def sync(cfg: Config, client: ZeppDataClient, ledger: Ledger, dry_run: bool = Fa
                 splits = decoder.parse_kilometer_splits(detail)
                 output_path = cfg.watch_dir / filename
                 fit_writer.write_fit(summary, points, output_path, splits=splits, device_name=device_name)
-                ledger.mark(trackid, filename, datetime.now(tz=timezone.utc).isoformat())
+                ledger.mark(trackid, filename, datetime.now(tz=UTC).isoformat())
                 print(f"exported {filename} ({len(points)} track points)")
                 exported += 1
             except Exception as e:
@@ -160,9 +156,7 @@ def run() -> int:
     args = parser.parse_args()
 
     try:
-        cfg = Config.from_env(
-            since_override=args.since, watch_dir_override=args.watch_dir, limit_override=args.limit
-        )
+        cfg = Config.from_env(since_override=args.since, watch_dir_override=args.watch_dir, limit_override=args.limit)
     except ConfigError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1

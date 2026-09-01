@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
@@ -19,7 +19,7 @@ class HealthState:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self.started_at = datetime.now(tz=timezone.utc)
+        self.started_at = datetime.now(tz=UTC)
         self.total_cycles = 0
         self.last_cycle_started_at: datetime | None = None
         self.last_cycle_finished_at: datetime | None = None
@@ -30,7 +30,7 @@ class HealthState:
         with self._lock:
             self.total_cycles += 1
             self.last_cycle_started_at = cycle_start
-            self.last_cycle_finished_at = datetime.now(tz=timezone.utc)
+            self.last_cycle_finished_at = datetime.now(tz=UTC)
             self.last_result = {
                 "exported": result.exported,
                 "skipped": result.skipped,
@@ -42,7 +42,7 @@ class HealthState:
         with self._lock:
             self.total_cycles += 1
             self.last_cycle_started_at = cycle_start
-            self.last_cycle_finished_at = datetime.now(tz=timezone.utc)
+            self.last_cycle_finished_at = datetime.now(tz=UTC)
             self.last_error = error
 
     def snapshot(self) -> dict:
@@ -50,9 +50,7 @@ class HealthState:
             return {
                 "started_at": self.started_at.isoformat(),
                 "total_cycles": self.total_cycles,
-                "last_cycle_started_at": self.last_cycle_started_at.isoformat()
-                if self.last_cycle_started_at
-                else None,
+                "last_cycle_started_at": self.last_cycle_started_at.isoformat() if self.last_cycle_started_at else None,
                 "last_cycle_finished_at": self.last_cycle_finished_at.isoformat()
                 if self.last_cycle_finished_at
                 else None,
@@ -71,7 +69,7 @@ def _make_handler(state: HealthState) -> type[BaseHTTPRequestHandler]:
             self.end_headers()
             self.wfile.write(body)
 
-        def do_GET(self) -> None:  # noqa: N802 (stdlib method name)
+        def do_GET(self) -> None:
             if self.path == "/healthz":
                 self._write_json(200, {"status": "ok"})
             elif self.path == "/status":
@@ -79,7 +77,7 @@ def _make_handler(state: HealthState) -> type[BaseHTTPRequestHandler]:
             else:
                 self._write_json(404, {"error": "not found"})
 
-        def log_message(self, format: str, *args) -> None:  # noqa: A002
+        def log_message(self, format: str, *args) -> None:
             pass  # quiet by default - loop.py already prints cycle summaries
 
     return Handler

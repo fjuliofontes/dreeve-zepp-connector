@@ -3,8 +3,8 @@ and caches the Zepp app_token/user_id so re-runs don't have to log in again."""
 
 from __future__ import annotations
 
+import contextlib
 import json
-import os
 from pathlib import Path
 
 
@@ -43,7 +43,5 @@ class Ledger:
         self.path.write_text(json.dumps(data, indent=2, sort_keys=True))
         # The ledger now doubles as an app_token cache - keep it off-limits
         # to other local users, same as the .env file it's derived from.
-        try:
-            os.chmod(self.path, 0o600)
-        except OSError:
-            pass
+        with contextlib.suppress(OSError):
+            self.path.chmod(0o600)

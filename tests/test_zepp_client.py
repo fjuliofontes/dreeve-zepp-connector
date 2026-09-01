@@ -33,8 +33,13 @@ class FakeHttp:
 
 
 def _client(responses: list, max_retries: int = 5, retry_base_delay: float = 2.0) -> ZeppDataClient:
-    client = ZeppDataClient(email="user@example.com", password="secret", max_retries=max_retries,
-                             retry_base_delay=retry_base_delay, _http=FakeHttp(responses))
+    client = ZeppDataClient(
+        email="user@example.com",
+        password="secret",
+        max_retries=max_retries,
+        retry_base_delay=retry_base_delay,
+        _http=FakeHttp(responses),  # type: ignore[arg-type]  # duck-types Session.get(), doesn't subclass it
+    )
     client.use_cached_auth("cached-token", "123")
     return client
 

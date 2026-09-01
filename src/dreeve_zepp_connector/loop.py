@@ -8,7 +8,7 @@ from __future__ import annotations
 import signal
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .config import Config, ConfigError
 from .health import HealthServer, HealthState
@@ -52,7 +52,7 @@ def run() -> int:
 
     stop = False
 
-    def _handle_signal(signum, frame) -> None:
+    def _handle_signal(signum, _frame) -> None:
         nonlocal stop
         print(f"received signal {signum}, stopping after current cycle")
         stop = True
@@ -62,7 +62,7 @@ def run() -> int:
 
     print(f"starting poll loop: every {cfg.poll_interval_seconds}s")
     while not stop:
-        cycle_start = datetime.now(tz=timezone.utc)
+        cycle_start = datetime.now(tz=UTC)
         try:
             result = sync(cfg, client, ledger, dry_run=False)
             state.record_success(cycle_start, result)

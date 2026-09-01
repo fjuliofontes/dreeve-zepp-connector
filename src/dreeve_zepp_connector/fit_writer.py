@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fit_tool.fit_file_builder import FitFileBuilder
@@ -44,7 +44,7 @@ _WORKOUT_FALLBACK = (Sport.FITNESS_EQUIPMENT, SubSport.GENERIC)
 TYPE_MAP: dict[int, tuple[Sport, SubSport]] = {
     1: (Sport.RUNNING, SubSport.GENERIC),
     6: (Sport.WALKING, SubSport.GENERIC),
-    7: (Sport.RUNNING, SubSport.TRAIL),          # Trailrunning
+    7: (Sport.RUNNING, SubSport.TRAIL),  # Trailrunning
     8: (Sport.RUNNING, SubSport.TREADMILL),
     9: (Sport.CYCLING, SubSport.GENERIC),
     10: (Sport.CYCLING, SubSport.INDOOR_CYCLING),
@@ -54,52 +54,52 @@ TYPE_MAP: dict[int, tuple[Sport, SubSport]] = {
     15: (Sport.SWIMMING, SubSport.OPEN_WATER),
     16: _WORKOUT_FALLBACK,  # "free training" in the app
     17: (Sport.TENNIS, SubSport.GENERIC),
-    18: (Sport.SOCCER, SubSport.GENERIC), 
-    19: (Sport.CROSS_COUNTRY_SKIING, SubSport.GENERIC), 
+    18: (Sport.SOCCER, SubSport.GENERIC),
+    19: (Sport.CROSS_COUNTRY_SKIING, SubSport.GENERIC),
     21: (Sport.JUMP_ROPE, SubSport.GENERIC),
-    22: (Sport.HIKING, SubSport.GENERIC),  
-    23: (Sport.FITNESS_EQUIPMENT, SubSport.INDOOR_ROWING), 
-    24: (Sport.FITNESS_EQUIPMENT, SubSport.GENERIC),    # Indoor Fitness
-    27: (Sport.TRAINING, SubSport.YOGA),    
+    22: (Sport.HIKING, SubSport.GENERIC),
+    23: (Sport.FITNESS_EQUIPMENT, SubSport.INDOOR_ROWING),
+    24: (Sport.FITNESS_EQUIPMENT, SubSport.GENERIC),  # Indoor Fitness
+    27: (Sport.TRAINING, SubSport.YOGA),
     39: (Sport.MULTISPORT, SubSport.GENERIC),
-    42: (Sport.SNOWBOARDING, SubSport.GENERIC),    
-    47: (Sport.CYCLING, SubSport.MOUNTAIN),      # MTB
+    42: (Sport.SNOWBOARDING, SubSport.GENERIC),
+    47: (Sport.CYCLING, SubSport.MOUNTAIN),  # MTB
     49: (Sport.TRAINING, SubSport.STRENGTH_TRAINING),
     70: (Sport.ROCK_CLIMBING, SubSport.GENERIC),
-    71: (Sport.GENERIC, SubSport.GENERIC), #Ballet
-    72: (Sport.GENERIC, SubSport.GENERIC), #Bauchtanz
-    73: (Sport.GENERIC, SubSport.GENERIC), #Squaredance
-    74: (Sport.GENERIC, SubSport.GENERIC), #Street Dance
-    75: (Sport.GENERIC, SubSport.GENERIC), #Turniertanz
-    76: (Sport.GENERIC, SubSport.GENERIC), #Tanzen
-    77: (Sport.GENERIC, SubSport.GENERIC), #Zumba
-    78: (Sport.CRICKET, SubSport.GENERIC), #Cricket
-    79: (Sport.BASEBALL, SubSport.GENERIC), #Baseball
-    80: (Sport.GENERIC, SubSport.GENERIC), #Bowling
-    81: (Sport.RACKET, SubSport.SQUASH), #Squash
-    82: (Sport.RUGBY, SubSport.GENERIC), #Rugby
-    85: (Sport.BASKETBALL, SubSport.GENERIC), #Basketball
-    86: (Sport.BASEBALL, SubSport.GENERIC), #Softball
-    87: (Sport.GENERIC, SubSport.GENERIC), #Gateball
+    71: (Sport.GENERIC, SubSport.GENERIC),  # Ballet
+    72: (Sport.GENERIC, SubSport.GENERIC),  # Bauchtanz
+    73: (Sport.GENERIC, SubSport.GENERIC),  # Squaredance
+    74: (Sport.GENERIC, SubSport.GENERIC),  # Street Dance
+    75: (Sport.GENERIC, SubSport.GENERIC),  # Turniertanz
+    76: (Sport.GENERIC, SubSport.GENERIC),  # Tanzen
+    77: (Sport.GENERIC, SubSport.GENERIC),  # Zumba
+    78: (Sport.CRICKET, SubSport.GENERIC),  # Cricket
+    79: (Sport.BASEBALL, SubSport.GENERIC),  # Baseball
+    80: (Sport.GENERIC, SubSport.GENERIC),  # Bowling
+    81: (Sport.RACKET, SubSport.SQUASH),  # Squash
+    82: (Sport.RUGBY, SubSport.GENERIC),  # Rugby
+    85: (Sport.BASKETBALL, SubSport.GENERIC),  # Basketball
+    86: (Sport.BASEBALL, SubSport.GENERIC),  # Softball
+    87: (Sport.GENERIC, SubSport.GENERIC),  # Gateball
     88: (Sport.VOLLEYBALL, SubSport.GENERIC),
     89: (Sport.RACKET, SubSport.TABLE_TENNIS),
-    90: (Sport.HOCKEY, SubSport.GENERIC), #Hockey
-    91: (Sport.TEAM_SPORT, SubSport.GENERIC), #Handball - no dedicated FIT Sport value
-    92: (Sport.RACKET, SubSport.BADMINTON), #Badminton      
-    93: (Sport.ARCHERY, SubSport.GENERIC), 
-    94: (Sport.GENERIC, SubSport.GENERIC), #equestrian
-    96: (Sport.GENERIC, SubSport.GENERIC), #Karate
-    97: (Sport.BOXING, SubSport.GENERIC), #Boxen
-    98: (Sport.GENERIC, SubSport.GENERIC), #Judo
-    99: (Sport.GENERIC, SubSport.GENERIC), #Ringen
-    100: (Sport.GENERIC, SubSport.GENERIC), #Tai Chi
-    101: (Sport.GENERIC, SubSport.GENERIC), #Muay Thai
-    102: (Sport.GENERIC, SubSport.GENERIC), #Taekwondo
-    103: (Sport.GENERIC, SubSport.GENERIC), #Kampfsport
-    104: (Sport.GENERIC, SubSport.GENERIC), #Kickboxen
+    90: (Sport.HOCKEY, SubSport.GENERIC),  # Hockey
+    91: (Sport.TEAM_SPORT, SubSport.GENERIC),  # Handball - no dedicated FIT Sport value
+    92: (Sport.RACKET, SubSport.BADMINTON),  # Badminton
+    93: (Sport.ARCHERY, SubSport.GENERIC),
+    94: (Sport.GENERIC, SubSport.GENERIC),  # equestrian
+    96: (Sport.GENERIC, SubSport.GENERIC),  # Karate
+    97: (Sport.BOXING, SubSport.GENERIC),  # Boxen
+    98: (Sport.GENERIC, SubSport.GENERIC),  # Judo
+    99: (Sport.GENERIC, SubSport.GENERIC),  # Ringen
+    100: (Sport.GENERIC, SubSport.GENERIC),  # Tai Chi
+    101: (Sport.GENERIC, SubSport.GENERIC),  # Muay Thai
+    102: (Sport.GENERIC, SubSport.GENERIC),  # Taekwondo
+    103: (Sport.GENERIC, SubSport.GENERIC),  # Kampfsport
+    104: (Sport.GENERIC, SubSport.GENERIC),  # Kickboxen
     105: (Sport.ALPINE_SKIING, SubSport.RESORT),
     140: (Sport.KAYAKING, SubSport.GENERIC),
-    148: (Sport.GENERIC, SubSport.GENERIC), #Fechten
+    148: (Sport.GENERIC, SubSport.GENERIC),  # Fechten
     178: (Sport.SNOWSHOEING, SubSport.GENERIC),
     223: _WORKOUT_FALLBACK,  # "just movement" in the app
 }
@@ -128,10 +128,13 @@ def _to_int(value) -> int | None:
 
 
 def _sport_for(zepp_type) -> tuple[Sport, SubSport]:
-    code = _to_int(zepp_type)
+    raw_code = _to_int(zepp_type)
+    # -1 is not a real Zepp type code; used as the TYPE_MAP/_warned_types key
+    # when raw_code is None, so those containers can stay set[int]/dict[int, ...].
+    code = raw_code if raw_code is not None else -1
     if code not in TYPE_MAP and code not in _warned_types:
         _warned_types.add(code)
-        print(f"warning: unmapped Zepp workout type {code}, exporting as a generic workout", file=sys.stderr)
+        print(f"warning: unmapped Zepp workout type {raw_code}, exporting as a generic workout", file=sys.stderr)
     return TYPE_MAP.get(code, _WORKOUT_FALLBACK)
 
 
@@ -387,12 +390,12 @@ def build_fit(
     zepp_type = summary.get("type")
     sport, sub_sport = _sport_for(zepp_type)
 
-    start_time = datetime.fromtimestamp(int(summary["trackid"]), tz=timezone.utc)
+    start_time = datetime.fromtimestamp(int(summary["trackid"]), tz=UTC)
     if points:
         end_time = points[-1].time
     else:
         run_time_s = float(summary.get("run_time") or 0)
-        end_time = datetime.fromtimestamp(start_time.timestamp() + run_time_s, tz=timezone.utc)
+        end_time = datetime.fromtimestamp(start_time.timestamp() + run_time_s, tz=UTC)
 
     start_ms, end_ms = _millis(start_time), _millis(end_time)
     total_elapsed_s = max((end_ms - start_ms) / 1000, 0.0)
@@ -449,8 +452,16 @@ def build_fit(
     builder.add(stop_event)
 
     laps = _build_laps(
-        start_ms, end_ms, total_distance, total_elapsed_s, avg_heart_rate, total_calories, sport, sub_sport,
-        splits or [], points,
+        start_ms,
+        end_ms,
+        total_distance,
+        total_elapsed_s,
+        avg_heart_rate,
+        total_calories,
+        sport,
+        sub_sport,
+        splits or [],
+        points,
     )
     for lap in laps:
         if avg_power is not None:

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -41,7 +41,7 @@ def _workout(trackid: int) -> dict:
 
 
 def test_stops_at_limit_without_fetching_extra_pages():
-    now = int(datetime.now(tz=timezone.utc).timestamp())
+    now = int(datetime.now(tz=UTC).timestamp())
     pages = [[_workout(now - i * DAY) for i in range(3)], [_workout(now - i * DAY) for i in range(3, 6)]]
     client = StubClient(pages)
 
@@ -52,11 +52,11 @@ def test_stops_at_limit_without_fetching_extra_pages():
 
 
 def test_pages_back_until_cutoff_is_covered():
-    now = int(datetime.now(tz=timezone.utc).timestamp())
+    now = int(datetime.now(tz=UTC).timestamp())
     # 6 workouts, one per day, spread across two pages of 3.
     pages = [[_workout(now - i * DAY) for i in range(3)], [_workout(now - i * DAY) for i in range(3, 6)]]
     client = StubClient(pages)
-    cutoff = datetime.fromtimestamp(now - 4 * DAY, tz=timezone.utc)
+    cutoff = datetime.fromtimestamp(now - 4 * DAY, tz=UTC)
 
     result = fetch_workouts(client, cutoff=cutoff, limit=200, page_size=3)
 
@@ -67,14 +67,14 @@ def test_pages_back_until_cutoff_is_covered():
 
 
 def test_stops_paging_once_a_page_is_entirely_before_cutoff():
-    now = int(datetime.now(tz=timezone.utc).timestamp())
+    now = int(datetime.now(tz=UTC).timestamp())
     pages = [
         [_workout(now - i * DAY) for i in range(3)],
         [_workout(now - i * DAY) for i in range(3, 6)],
         [_workout(now - i * DAY) for i in range(6, 9)],
     ]
     client = StubClient(pages)
-    cutoff = datetime.fromtimestamp(now - 4 * DAY, tz=timezone.utc)
+    cutoff = datetime.fromtimestamp(now - 4 * DAY, tz=UTC)
 
     fetch_workouts(client, cutoff=cutoff, limit=200, page_size=3)
 
@@ -93,23 +93,23 @@ def test_empty_page_stops_pagination():
 
 
 def _cfg(tmp_path, **overrides) -> Config:
-    defaults = dict(
-        email="user@example.com",
-        password="secret",
-        watch_dir=tmp_path,
-        state_dir=tmp_path,
-        ledger_path=tmp_path / "ledger.json",
-        since=None,
-        limit=200,
-        country="US",
-        device_names={},
-        max_retries=5,
-        retry_base_delay=2.0,
-        download_delay_seconds=0.0,
-        max_downloads_per_cycle=None,
-        poll_interval_seconds=3600,
-        health_port=8080,
-    )
+    defaults = {
+        "email": "user@example.com",
+        "password": "secret",
+        "watch_dir": tmp_path,
+        "state_dir": tmp_path,
+        "ledger_path": tmp_path / "ledger.json",
+        "since": None,
+        "limit": 200,
+        "country": "US",
+        "device_names": {},
+        "max_retries": 5,
+        "retry_base_delay": 2.0,
+        "download_delay_seconds": 0.0,
+        "max_downloads_per_cycle": None,
+        "poll_interval_seconds": 3600,
+        "health_port": 8080,
+    }
     defaults.update(overrides)
     return Config(**defaults)
 
@@ -126,7 +126,7 @@ def _stub_decoding(monkeypatch):
 
 def test_sync_stops_at_max_downloads_per_cycle(tmp_path, monkeypatch, capsys):
     _stub_decoding(monkeypatch)
-    now = int(datetime.now(tz=timezone.utc).timestamp())
+    now = int(datetime.now(tz=UTC).timestamp())
     client = StubClient([[_workout(now - i * DAY) for i in range(5)]])
     ledger = Ledger(tmp_path / "ledger.json")
     cfg = _cfg(tmp_path, max_downloads_per_cycle=2)
@@ -140,7 +140,7 @@ def test_sync_stops_at_max_downloads_per_cycle(tmp_path, monkeypatch, capsys):
 
 def test_sync_leaves_uncapped_workouts_for_next_cycle(tmp_path, monkeypatch):
     _stub_decoding(monkeypatch)
-    now = int(datetime.now(tz=timezone.utc).timestamp())
+    now = int(datetime.now(tz=UTC).timestamp())
     workouts = [_workout(now - i * DAY) for i in range(5)]
     ledger = Ledger(tmp_path / "ledger.json")
     cfg = _cfg(tmp_path, max_downloads_per_cycle=2)
@@ -158,7 +158,7 @@ def test_sync_sleeps_between_downloads(tmp_path, monkeypatch):
     _stub_decoding(monkeypatch)
     sleeps = []
     monkeypatch.setattr(main_module.time, "sleep", lambda s: sleeps.append(s))
-    now = int(datetime.now(tz=timezone.utc).timestamp())
+    now = int(datetime.now(tz=UTC).timestamp())
     client = StubClient([[_workout(now - i * DAY) for i in range(3)]])
     ledger = Ledger(tmp_path / "ledger.json")
     cfg = _cfg(tmp_path, download_delay_seconds=0.5)
@@ -170,7 +170,7 @@ def test_sync_sleeps_between_downloads(tmp_path, monkeypatch):
 
 def test_sync_dry_run_does_not_sleep_or_call_detail(tmp_path, monkeypatch):
     monkeypatch.setattr(main_module.time, "sleep", lambda s: pytest.fail("dry-run should not sleep"))
-    now = int(datetime.now(tz=timezone.utc).timestamp())
+    now = int(datetime.now(tz=UTC).timestamp())
     client = StubClient([[_workout(now - i * DAY) for i in range(3)]])
     ledger = Ledger(tmp_path / "ledger.json")
     cfg = _cfg(tmp_path, download_delay_seconds=0.5)

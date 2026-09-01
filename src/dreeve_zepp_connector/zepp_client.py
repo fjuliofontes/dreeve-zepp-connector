@@ -20,8 +20,9 @@ this project.
 
 from __future__ import annotations
 
-import json
 import base64
+import contextlib
+import json
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -36,8 +37,7 @@ DATA_HOST = "api-mifit.zepp.com"
 _WEB_APP_NAME = "com.huami.webapp"
 _WEB_REDIRECT_URI = "https://s3-us-west-2.amazonaws.com/hm-registration/successsignin.html"
 _WEB_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 )
 
 # Android-app header identity used for data calls (history/detail), ported
@@ -108,9 +108,7 @@ def _web_login(http: requests.Session, email: str, password: str, country: str) 
         except ValueError:
             pass
     if not access_code:
-        raise ZeppClientError(
-            f"login failed at registration step (HTTP {reg_resp.status_code}): {reg_resp.text[:300]}"
-        )
+        raise ZeppClientError(f"login failed at registration step (HTTP {reg_resp.status_code}): {reg_resp.text[:300]}")
 
     login_headers = {
         "app_name": _WEB_APP_NAME,
@@ -142,7 +140,7 @@ def _web_login(http: requests.Session, email: str, password: str, country: str) 
     except ValueError:
         raise ZeppClientError(
             f"login failed at token-exchange step (HTTP {login_resp.status_code}): {login_resp.text[:300]}"
-        )
+        ) from None
     login_token, user_id = token_info.get("login_token"), token_info.get("user_id")
     if not login_token or not user_id:
         raise ZeppClientError(f"login failed at token-exchange step: missing login_token/user_id in {token_info}")
@@ -214,16 +212,16 @@ class ZeppDataClient:
 
     def _get(self, path: str, params: dict, _retry: bool = True) -> dict:
         self._ensure()
+        token = self._app_token
+        assert token is not None, "_ensure() must set _app_token or raise"
         url = f"https://{DATA_HOST}{path}"
 
         for attempt in range(self.max_retries + 1):
             try:
-                r = self._http.get(
-                    url, headers=_data_headers(self.app_token), params=params, timeout=30
-                )
+                r = self._http.get(url, headers=_data_headers(token), params=params, timeout=30)
             except requests.exceptions.RequestException as e:
                 if attempt >= self.max_retries:
-                    raise ZeppClientError(f"{path} failed after {attempt + 1} attempts: {e}")
+                    raise ZeppClientError(f"{path} failed after {attempt + 1} attempts: {e}") from e
                 time.sleep(self._backoff_delay(attempt))
                 continue
 
@@ -242,7 +240,7 @@ class ZeppDataClient:
             try:
                 return r.json()
             except ValueError:
-                raise ZeppClientError(f"{path} -> {r.status_code} non-JSON: {r.text[:300]}")
+                raise ZeppClientError(f"{path} -> {r.status_code} non-JSON: {r.text[:300]}") from None
 
         raise ZeppClientError(f"{path} failed after {self.max_retries + 1} attempts")
 
@@ -254,9 +252,7 @@ class ZeppDataClient:
         `workouts_page()` directly."""
         return self.workouts_page(limit=limit)[0]
 
-    def workouts_page(
-        self, limit: int = 50, before_trackid: int | str | None = None
-    ) -> tuple[list[dict], int | None]:
+    def workouts_page(self, limit: int = 50, before_trackid: int | str | None = None) -> tuple[list[dict], int | None]:
         """One page of workout summaries, newest-first.
 
         Zepp's history endpoint pages via a `trackid` cursor rather than an
@@ -315,10 +311,8 @@ def _extract_list(j: dict) -> list[dict]:
     if isinstance(data, dict):
         summary = data.get("summary")
         if isinstance(summary, str):
-            try:
+            with contextlib.suppress(Exception):
                 summary = json.loads(summary)
-            except Exception:
-                pass
         if isinstance(summary, dict) and isinstance(summary.get("data"), list):
             return summary["data"]
         if isinstance(summary, list):

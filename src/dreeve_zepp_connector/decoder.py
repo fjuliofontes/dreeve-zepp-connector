@@ -51,9 +51,8 @@ import array
 from bisect import bisect_left
 from collections import namedtuple
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from itertools import accumulate
-from typing import Optional
 
 NO_VALUE = -2000000
 
@@ -97,14 +96,14 @@ class ExportablePoint:
     time: datetime
     latitude: float
     longitude: float
-    altitude: Optional[float]
-    heart_rate: Optional[float]
-    cadence: Optional[float]
-    speed: Optional[float] = None
-    distance: Optional[float] = None
-    power: Optional[int] = None
-    step_length: Optional[float] = None
-    stroke_cadence: Optional[float] = None
+    altitude: float | None
+    heart_rate: float | None
+    cadence: float | None
+    speed: float | None = None
+    distance: float | None = None
+    power: int | None = None
+    step_length: float | None = None
+    stroke_cadence: float | None = None
 
 
 @dataclass
@@ -114,12 +113,12 @@ class KilometerSplit:
 
     index: int
     duration_ms: int
-    avg_heart_rate: Optional[int]
+    avg_heart_rate: int | None
 
 
 class Interpolate:
     def __init__(self, x_list, y_list):
-        intervals = zip(x_list, x_list[1:], y_list, y_list[1:])
+        intervals = zip(x_list, x_list[1:], y_list, y_list[1:], strict=False)
         self.x_list = x_list
         self.y_list = y_list
         self.slopes = [(y2 - y1) // ((x2 - x1) or 1) for x1, x2, y1, y2 in intervals]
@@ -166,28 +165,14 @@ def parse_track_data(detail: dict) -> RawTrackData:
     stroketimes, stroke = _pair_samples(detail.get("stroke_speed"), scale=_FLOAT_SCALE * 60)
     return RawTrackData(
         times=array.array("q", [int(v) for v in _samples(detail.get("time"))]),
-        lat=array.array(
-            "q", [int(v.split(",")[0]) for v in _samples(detail.get("longitude_latitude"))]
-        ),
-        lon=array.array(
-            "q", [int(v.split(",")[1]) for v in _samples(detail.get("longitude_latitude"))]
-        ),
+        lat=array.array("q", [int(v.split(",")[0]) for v in _samples(detail.get("longitude_latitude"))]),
+        lon=array.array("q", [int(v.split(",")[1]) for v in _samples(detail.get("longitude_latitude"))]),
         alt=array.array("q", [int(v) for v in _samples(detail.get("altitude"))]),
-        hrtimes=array.array(
-            "q", [int(v.split(",")[0] or 1) for v in _samples(detail.get("heart_rate"))]
-        ),
-        hr=array.array(
-            "q", [int(v.split(",")[1]) for v in _samples(detail.get("heart_rate"))]
-        ),
-        steptimes=array.array(
-            "q", [int(v.split(",")[0]) for v in _samples(detail.get("gait"))]
-        ),
-        stride=array.array(
-            "q", [int(v.split(",")[2]) for v in _samples(detail.get("gait"))]
-        ),
-        cadence=array.array(
-            "q", [int(v.split(",")[3]) for v in _samples(detail.get("gait"))]
-        ),
+        hrtimes=array.array("q", [int(v.split(",")[0] or 1) for v in _samples(detail.get("heart_rate"))]),
+        hr=array.array("q", [int(v.split(",")[1]) for v in _samples(detail.get("heart_rate"))]),
+        steptimes=array.array("q", [int(v.split(",")[0]) for v in _samples(detail.get("gait"))]),
+        stride=array.array("q", [int(v.split(",")[2]) for v in _samples(detail.get("gait"))]),
+        cadence=array.array("q", [int(v.split(",")[3]) for v in _samples(detail.get("gait"))]),
         spdtimes=spdtimes,
         spd=spd,
         disttimes=disttimes,
@@ -234,6 +219,7 @@ def track_points(track_data: RawTrackData):
         track_data.dist,
         track_data.power,
         track_data.stroke,
+        strict=False,
     ):
         # NO_VALUE survives interpolation only when a channel has zero valid
         # samples for the whole workout (e.g. no barometer data) - the
@@ -261,16 +247,14 @@ def interpolate_data(track_data: RawTrackData) -> RawTrackData:
     power_times = array.array("q", accumulate(track_data.powertimes))
     stroke_times = array.array("q", accumulate(track_data.stroketimes))
 
-    times = list(
-        sorted(
-            set(track_times)
-            .union(hr_times)
-            .union(step_times)
-            .union(spd_times)
-            .union(dist_times)
-            .union(power_times)
-            .union(stroke_times)
-        )
+    times = sorted(
+        set(track_times)
+        .union(hr_times)
+        .union(step_times)
+        .union(spd_times)
+        .union(dist_times)
+        .union(power_times)
+        .union(stroke_times)
     )
 
     return track_data._replace(
@@ -319,7 +303,7 @@ def parse_points(start_time: int, detail: dict) -> list[ExportablePoint]:
 
     return [
         ExportablePoint(
-            time=datetime.fromtimestamp(point.time + start_time, tz=timezone.utc),
+            time=datetime.fromtimestamp(point.time + start_time, tz=UTC),
             latitude=point.position.lat,
             longitude=point.position.lon,
             altitude=point.position.alt,

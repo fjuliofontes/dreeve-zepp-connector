@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fit_tool.fit_file import FitFile
 
@@ -44,7 +44,7 @@ def test_build_fit_accepts_decimal_string_summary_fields():
 def test_build_fit_omits_altitude_when_entirely_missing():
     points = [
         ExportablePoint(
-            time=datetime.fromtimestamp(START_TRACKID + i, tz=timezone.utc),
+            time=datetime.fromtimestamp(START_TRACKID + i, tz=UTC),
             latitude=40.0 + i * 0.0001,
             longitude=-73.95,
             altitude=None,
@@ -57,11 +57,7 @@ def test_build_fit_omits_altitude_when_entirely_missing():
 
     data = build_fit(summary, points)  # must not raise
 
-    records = [
-        r.message
-        for r in FitFile.from_bytes(data).records
-        if type(r.message).__name__ == "RecordMessage"
-    ]
+    records = [r.message for r in FitFile.from_bytes(data).records if type(r.message).__name__ == "RecordMessage"]
     assert len(records) == 3
     assert all(r.altitude is None for r in records)
 
@@ -95,11 +91,7 @@ def test_build_fit_emits_synthetic_records_for_trackless_workouts():
 
     data = build_fit(summary, [])
 
-    records = [
-        r.message
-        for r in FitFile.from_bytes(data).records
-        if type(r.message).__name__ == "RecordMessage"
-    ]
+    records = [r.message for r in FitFile.from_bytes(data).records if type(r.message).__name__ == "RecordMessage"]
     assert len(records) > 1
     assert records[0].timestamp == START_TRACKID * 1000
     assert records[-1].timestamp == (START_TRACKID + 1800) * 1000
@@ -115,7 +107,7 @@ def test_build_fit_drops_out_of_range_interpolated_values():
     # (seen live: cadence of -46). FIT's uint8/uint16 encoding would raise on
     # these; build_fit must drop just the offending field, not the point.
     point = ExportablePoint(
-        time=datetime.fromtimestamp(START_TRACKID, tz=timezone.utc),
+        time=datetime.fromtimestamp(START_TRACKID, tz=UTC),
         latitude=40.0,
         longitude=-73.95,
         altitude=-20000.0,  # NO_VALUE sentinel leaking through unscaled
@@ -126,9 +118,7 @@ def test_build_fit_drops_out_of_range_interpolated_values():
 
     data = build_fit(summary, [point])  # must not raise
 
-    record = next(
-        r.message for r in FitFile.from_bytes(data).records if type(r.message).__name__ == "RecordMessage"
-    )
+    record = next(r.message for r in FitFile.from_bytes(data).records if type(r.message).__name__ == "RecordMessage")
     assert record.altitude is None
     assert record.heart_rate is None
     assert record.cadence is None
@@ -140,12 +130,22 @@ def test_build_fit_prefers_decoded_distance_over_haversine():
     # replaced by a recomputed haversine sum.
     points = [
         ExportablePoint(
-            time=datetime.fromtimestamp(START_TRACKID, tz=timezone.utc),
-            latitude=40.0, longitude=-73.95, altitude=10.0, heart_rate=120, cadence=170, distance=0.0,
+            time=datetime.fromtimestamp(START_TRACKID, tz=UTC),
+            latitude=40.0,
+            longitude=-73.95,
+            altitude=10.0,
+            heart_rate=120,
+            cadence=170,
+            distance=0.0,
         ),
         ExportablePoint(
-            time=datetime.fromtimestamp(START_TRACKID + 60, tz=timezone.utc),
-            latitude=40.001, longitude=-73.95, altitude=10.0, heart_rate=150, cadence=170, distance=500.0,
+            time=datetime.fromtimestamp(START_TRACKID + 60, tz=UTC),
+            latitude=40.001,
+            longitude=-73.95,
+            altitude=10.0,
+            heart_rate=150,
+            cadence=170,
+            distance=500.0,
         ),
     ]
     summary = {"trackid": str(START_TRACKID), "type": 1, "dis": 500, "calorie": 50, "avg_heart_rate": 135}
@@ -161,7 +161,7 @@ def test_build_fit_prefers_decoded_distance_over_haversine():
 def test_build_fit_decodes_speed_power_and_computes_total_work():
     points = [
         ExportablePoint(
-            time=datetime.fromtimestamp(START_TRACKID + i, tz=timezone.utc),
+            time=datetime.fromtimestamp(START_TRACKID + i, tz=UTC),
             latitude=40.0,
             longitude=-73.95,
             altitude=10.0,
@@ -201,7 +201,7 @@ def test_build_fit_uses_stroke_cadence_unhalved_for_swims():
     # confirmed live against a real Zepp-app FIT export.
     points = [
         ExportablePoint(
-            time=datetime.fromtimestamp(START_TRACKID + i, tz=timezone.utc),
+            time=datetime.fromtimestamp(START_TRACKID + i, tz=UTC),
             latitude=40.0,
             longitude=-73.95,
             altitude=None,
@@ -249,12 +249,22 @@ def test_build_fit_omits_power_fields_when_no_power_data():
 def test_build_fit_builds_per_kilometer_laps_when_splits_consistent():
     points = [
         ExportablePoint(
-            time=datetime.fromtimestamp(START_TRACKID, tz=timezone.utc),
-            latitude=40.0, longitude=-73.95, altitude=10.0, heart_rate=120, cadence=170, distance=0.0,
+            time=datetime.fromtimestamp(START_TRACKID, tz=UTC),
+            latitude=40.0,
+            longitude=-73.95,
+            altitude=10.0,
+            heart_rate=120,
+            cadence=170,
+            distance=0.0,
         ),
         ExportablePoint(
-            time=datetime.fromtimestamp(START_TRACKID + 600, tz=timezone.utc),
-            latitude=40.02, longitude=-73.95, altitude=10.0, heart_rate=150, cadence=170, distance=2500.0,
+            time=datetime.fromtimestamp(START_TRACKID + 600, tz=UTC),
+            latitude=40.02,
+            longitude=-73.95,
+            altitude=10.0,
+            heart_rate=150,
+            cadence=170,
+            distance=2500.0,
         ),
     ]
     splits = [
@@ -285,12 +295,22 @@ def test_build_fit_falls_back_to_single_lap_when_splits_inconsistent():
     # back to one whole-workout lap rather than emit misleading splits.
     points = [
         ExportablePoint(
-            time=datetime.fromtimestamp(START_TRACKID, tz=timezone.utc),
-            latitude=40.0, longitude=-73.95, altitude=10.0, heart_rate=120, cadence=170, distance=0.0,
+            time=datetime.fromtimestamp(START_TRACKID, tz=UTC),
+            latitude=40.0,
+            longitude=-73.95,
+            altitude=10.0,
+            heart_rate=120,
+            cadence=170,
+            distance=0.0,
         ),
         ExportablePoint(
-            time=datetime.fromtimestamp(START_TRACKID + 600, tz=timezone.utc),
-            latitude=40.02, longitude=-73.95, altitude=10.0, heart_rate=150, cadence=170, distance=2500.0,
+            time=datetime.fromtimestamp(START_TRACKID + 600, tz=UTC),
+            latitude=40.02,
+            longitude=-73.95,
+            altitude=10.0,
+            heart_rate=150,
+            cadence=170,
+            distance=2500.0,
         ),
     ]
     splits = [KilometerSplit(index=i, duration_ms=100_000, avg_heart_rate=140) for i in range(5)]

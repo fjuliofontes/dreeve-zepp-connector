@@ -12,7 +12,10 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "mypy>=1.14",
     "pytest>=8.3.0",
+    "ruff>=0.9",
+    "types-requests",
 ]
 
 [project.scripts]
@@ -25,3 +28,53 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dreeve_zepp_connector"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "DTZ",  # flake8-datetimez
+    "PTH",  # flake8-use-pathlib
+    "SIM",  # flake8-simplify
+    "TID",  # flake8-tidy-imports
+    "ARG",  # flake8-unused-arguments
+    "RUF",  # ruff specific rules
+]
+ignore = [
+    "RUF002",  # "x" for multiplication (x60, x10, ...) is all over the decoder's docstrings
+    "RUF003",  # same, in comments
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["dreeve_zepp_connector"]
+
+[tool.ruff.lint.per-file-ignores]
+# Test doubles intentionally mirror production call signatures (positional
+# lambdas standing in for time.sleep/decoder functions, a fake requests
+# Session.get taking headers=/params=/timeout= keywords) - the "unused"
+# arguments are required to match what production code actually calls.
+"tests/*" = ["ARG001", "ARG002", "ARG005"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+# fit-tool ships no type information.
+module = ["fit_tool.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers --strict-config"

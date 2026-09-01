@@ -1,7 +1,7 @@
 import json
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from dreeve_zepp_connector.health import HealthServer, HealthState
 from dreeve_zepp_connector.main import SyncResult
@@ -21,7 +21,7 @@ def test_state_snapshot_before_any_cycle():
 def test_state_records_success():
     state = HealthState()
 
-    state.record_success(datetime.now(tz=timezone.utc), SyncResult(exported=2, skipped=1, failed=0))
+    state.record_success(datetime.now(tz=UTC), SyncResult(exported=2, skipped=1, failed=0))
 
     snap = state.snapshot()
     assert snap["total_cycles"] == 1
@@ -32,7 +32,7 @@ def test_state_records_success():
 def test_state_records_failure():
     state = HealthState()
 
-    state.record_failure(datetime.now(tz=timezone.utc), "boom")
+    state.record_failure(datetime.now(tz=UTC), "boom")
 
     snap = state.snapshot()
     assert snap["total_cycles"] == 1
@@ -46,7 +46,7 @@ def _get_json(url: str) -> dict:
 
 def test_server_serves_healthz_and_status():
     state = HealthState()
-    state.record_success(datetime.now(tz=timezone.utc), SyncResult(exported=1, skipped=0, failed=0))
+    state.record_success(datetime.now(tz=UTC), SyncResult(exported=1, skipped=0, failed=0))
     server = HealthServer(state, port=0)  # OS-assigned port
     server.start()
     try:
@@ -67,7 +67,7 @@ def test_server_404s_on_unknown_path():
     try:
         try:
             urllib.request.urlopen(f"http://localhost:{server.port}/nope", timeout=3)
-            assert False, "expected HTTPError"
+            raise AssertionError("expected HTTPError")
         except urllib.error.HTTPError as e:
             assert e.code == 404
     finally:

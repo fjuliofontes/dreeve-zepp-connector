@@ -1,12 +1,10 @@
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from dreeve_zepp_connector.decoder import parse_kilometer_splits, parse_points
 
-FIXTURE = json.loads(
-    (Path(__file__).parent / "fixtures" / "sample_workout_detail.json").read_text()
-)
+FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "sample_workout_detail.json").read_text())
 START_TIME = 1_700_000_000
 
 
@@ -14,9 +12,7 @@ def test_parse_points_decodes_all_channels():
     points = parse_points(START_TIME, FIXTURE)
 
     assert len(points) == 3
-    assert [p.time for p in points] == [
-        datetime.fromtimestamp(START_TIME + offset, tz=timezone.utc) for offset in (0, 10, 20)
-    ]
+    assert [p.time for p in points] == [datetime.fromtimestamp(START_TIME + offset, tz=UTC) for offset in (0, 10, 20)]
     assert [round(p.latitude, 8) for p in points] == [40.0, 40.00001, 40.00002]
     assert [round(p.longitude, 8) for p in points] == [-73.95, -73.94999, -73.94998]
     assert [round(p.altitude, 2) for p in points] == [10.0, 11.0, 12.0]

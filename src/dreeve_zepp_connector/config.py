@@ -62,7 +62,7 @@ class Config:
         since_override: str | None = None,
         watch_dir_override: str | None = None,
         limit_override: int | None = None,
-    ) -> "Config":
+    ) -> Config:
         email = os.environ.get("ZEPP_EMAIL")
         password = os.environ.get("ZEPP_PASSWORD")
         if not email or not password:
