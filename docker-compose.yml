@@ -1,6 +1,8 @@
 services:
   dreeve-zepp-connector:
     build: .
+    image: ghcr.io/dreeveapp/dreeve-zepp-connector:latest
+    container_name: dreeve-zepp-connector
     restart: unless-stopped
     env_file:
       - .env
